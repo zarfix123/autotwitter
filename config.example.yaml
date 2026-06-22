@@ -1,0 +1,89 @@
+# X Growth Engine configuration. Copy to config.yaml and edit.
+# Everything here is data, not code — no behavior is hardcoded in the modules.
+
+# GitHub repos to watch. The git watcher polls each repo's commits.
+repos:
+  - owner: zarfix123
+    name: autotwitter
+  # - owner: zarfix123
+  #   name: another-project
+
+# The GitHub login whose commits count as "my work". Used to filter commit authors.
+github_author: zarfix123
+
+# Niche / topic clusters. Drives relevance ranking and content framing.
+topic_clusters:
+  - AI
+  - edtech
+  - building a startup in public
+
+# Accounts to monitor for reply opportunities (Phase 2). Handles without the @.
+target_accounts:
+  - levelsio
+  - naval
+
+# Keywords / topics to monitor (Phase 2).
+keywords:
+  - build in public
+  - indie hackers
+  - edtech
+
+# A few of my real posts so generated drafts sound like me.
+voice_samples:
+  - "shipped a thing today. small, but it's the kind of small that compounds."
+  - "the boring part of building in public is that the work has to actually be good first."
+
+# When my audience is active (local time, 24h HH:MM). Posts land inside these windows.
+posting_windows:
+  - "09:00-11:00"
+  - "16:00-18:00"
+
+# Cadence
+posts_per_day: 2          # default 2; research-backed sweet spot is 2-4. Hard cap.
+min_post_spacing_minutes: 180   # >= 3h between posts
+post_jitter_minutes: 25         # randomize exact send time +/- this many minutes
+
+# Reply queue (Phase 2)
+daily_reply_queue_size: 5  # default 5, adjustable up to ~15
+
+# When the daily approval reminder fires (local HH:MM-HH:MM). A jittered time is
+# picked inside this window each day so the session reminder isn't mechanical.
+reply_reminder_window: "12:00-13:00"
+
+# How often the read-only monitor scans for reply opportunities (minutes).
+monitor_scan_interval_minutes: 30
+
+# Opportunities older than this are dropped/expired — being an early reply on a
+# climbing post is where the visibility is, so we favor fresh posts.
+opportunity_max_age_minutes: 120
+
+# Follows (Phase 2) — keep low and paced. 0 disables follow suggestions entirely.
+max_follows_per_day: 2
+# Minimum spacing between approved follows (minutes), enforced in the gate so
+# approved follows never go out as a burst.
+follow_min_spacing_minutes: 240
+
+# --- Phase 3: feedback & timeliness ---
+# How often to pull our own posts' performance (hours). Cheap owned reads; the
+# learned topics/times feed back into drafting + scheduling.
+analytics_pull_interval_hours: 6
+
+# Live-reply notifier: how often to check target accounts for a brand-new post.
+live_reply_interval_minutes: 10
+# Only treat a target post as "live" if it's newer than this (minutes) — being an
+# early reply on a climbing post is where the visibility is.
+live_reply_max_age_minutes: 15
+# Optional follower floor for live-reply targets (0 = every target account).
+live_reply_min_followers: 0
+
+# Whether I have X Premium (affects expected reach, not behavior).
+x_premium: false
+
+# Cost guardrail (USD). When weekly spend nears this, non-essential reads pause.
+weekly_cost_cap_usd: 15.0
+
+# Model selection per job (verified IDs).
+models:
+  classify: claude-haiku-4-5      # cheap meaningfulness/relevance checks
+  draft: claude-sonnet-4-6        # posts, threads, replies
+  polish: claude-opus-4-8         # opt-in thread polishing only
