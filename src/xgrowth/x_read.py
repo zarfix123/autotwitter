@@ -28,10 +28,19 @@ class Tweet:
     author_followers: int | None = None
 
 
+@dataclass
+class Metrics:
+    impressions: int = 0
+    likes: int = 0
+    reposts: int = 0
+    replies: int = 0
+
+
 class XReader(Protocol):
     def search_recent(self, query: str, max_results: int = 10) -> list[Tweet]: ...
     def user_recent(self, handle: str, max_results: int = 5) -> list[Tweet]: ...
     def follower_counts(self, handles: list[str]) -> dict[str, int]: ...
+    def tweet_metrics(self, tweet_ids: list[str]) -> dict[str, Metrics]: ...
 
 
 class FakeXReader:
@@ -42,10 +51,12 @@ class FakeXReader:
         search_results: dict[str, list[Tweet]] | None = None,
         timelines: dict[str, list[Tweet]] | None = None,
         followers: dict[str, int] | None = None,
+        metrics: dict[str, Metrics] | None = None,
     ) -> None:
         self.search_results = search_results or {}
         self.timelines = timelines or {}
         self.followers = followers or {}
+        self.metrics = metrics or {}
         self.calls: list[tuple[str, str]] = []
 
     def search_recent(self, query: str, max_results: int = 10) -> list[Tweet]:
@@ -59,6 +70,10 @@ class FakeXReader:
     def follower_counts(self, handles: list[str]) -> dict[str, int]:
         self.calls.append(("followers", ",".join(handles)))
         return {h: self.followers.get(h, 0) for h in handles}
+
+    def tweet_metrics(self, tweet_ids: list[str]) -> dict[str, Metrics]:
+        self.calls.append(("metrics", ",".join(tweet_ids)))
+        return {tid: self.metrics.get(tid, Metrics()) for tid in tweet_ids}
 
 
 class RealXReader:
@@ -111,6 +126,24 @@ class RealXReader:
         for u in resp.data or []:
             pm = getattr(u, "public_metrics", None) or {}
             out[u.username] = int(pm.get("followers_count", 0))
+        return out
+
+    def tweet_metrics(self, tweet_ids: list[str]) -> dict[str, Metrics]:
+        out: dict[str, Metrics] = {}
+        for i in range(0, len(tweet_ids), 100):  # API caps at 100 ids/call
+            batch = tweet_ids[i : i + 100]
+            resp = self._client.get_tweets(
+                ids=batch, tweet_fields=["public_metrics"], user_auth=False
+            )
+            self._record("owned_read", len(batch))
+            for t in resp.data or []:
+                pm = getattr(t, "public_metrics", None) or {}
+                out[str(t.id)] = Metrics(
+                    impressions=int(pm.get("impression_count", 0)),
+                    likes=int(pm.get("like_count", 0)),
+                    reposts=int(pm.get("retweet_count", 0)),
+                    replies=int(pm.get("reply_count", 0)),
+                )
         return out
 
     def _to_tweets(self, resp) -> list[Tweet]:

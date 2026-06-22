@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, time, timedelta
 
 from xgrowth import scheduler
+from xgrowth.config import config_from_dict
 
 NOW = datetime(2026, 6, 22, 8, 0, tzinfo=UTC)  # before the first window
 
@@ -71,6 +72,39 @@ def test_all_assigned_in_future_and_marked_scheduled(conn, config):
             "SELECT status FROM drafts WHERE id = ?", (draft_id,)
         ).fetchone()["status"]
         assert status == "scheduled"
+
+
+def _three_window_one_post_config():
+    return config_from_dict(
+        {
+            "repos": [],
+            "github_author": "x",
+            "topic_clusters": ["AI"],
+            "target_accounts": [],
+            "keywords": [],
+            "voice_samples": [],
+            "posting_windows": ["09:00-09:30", "12:00-12:30", "16:00-16:30"],
+            "posts_per_day": 1,
+            "min_post_spacing_minutes": 30,
+            "post_jitter_minutes": 0,
+        }
+    )
+
+
+def test_preferred_hours_biases_window_choice(conn):
+    cfg = _three_window_one_post_config()
+    _insert_drafts(conn, 1)
+    assigned = scheduler.schedule_pending(
+        conn, cfg, now=NOW, jitter_fn=lambda a, b: 0, preferred_hours=[16, 12, 9]
+    )
+    assert assigned[0][1].time() == time(16, 0)
+
+
+def test_default_no_preference_picks_earliest(conn):
+    cfg = _three_window_one_post_config()
+    _insert_drafts(conn, 1)
+    assigned = scheduler.schedule_pending(conn, cfg, now=NOW, jitter_fn=lambda a, b: 0)
+    assert assigned[0][1].time() == time(9, 0)
 
 
 def test_due_drafts_returns_only_past(conn, config):

@@ -52,6 +52,11 @@ class Config:
     monitor_scan_interval_minutes: int = 30
     opportunity_max_age_minutes: int = 120
     follow_min_spacing_minutes: int = 240
+    # Phase 3 (feedback & timeliness) tunables.
+    analytics_pull_interval_hours: int = 6
+    live_reply_interval_minutes: int = 10
+    live_reply_max_age_minutes: int = 15
+    live_reply_min_followers: int = 0
     models: Models = field(default_factory=Models)
 
     # ---- validation helpers -------------------------------------------------
@@ -123,6 +128,10 @@ def config_from_dict(raw: dict) -> Config:
         monitor_scan_interval_minutes=int(raw.get("monitor_scan_interval_minutes", 30)),
         opportunity_max_age_minutes=int(raw.get("opportunity_max_age_minutes", 120)),
         follow_min_spacing_minutes=int(raw.get("follow_min_spacing_minutes", 240)),
+        analytics_pull_interval_hours=int(raw.get("analytics_pull_interval_hours", 6)),
+        live_reply_interval_minutes=int(raw.get("live_reply_interval_minutes", 10)),
+        live_reply_max_age_minutes=int(raw.get("live_reply_max_age_minutes", 15)),
+        live_reply_min_followers=int(raw.get("live_reply_min_followers", 0)),
         models=models,
     )
 

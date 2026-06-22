@@ -32,15 +32,17 @@ def _max_len(config: Config) -> int:
     return max_len(config.x_premium)
 
 
-def _system_prompt(config: Config) -> str:
+def _system_prompt(config: Config, hints: str | None = None) -> str:
     # Stable across drafts -> cached. Keep voice guide here.
     samples = "\n".join(f"- {s}" for s in config.voice_samples)
     clusters = ", ".join(config.topic_clusters)
+    perf = f"\nPerformance signal (use lightly, don't force): {hints}\n" if hints else ""
     return (
         "You write original 'building in public' posts for a solo founder on X.\n"
         f"Topics: {clusters}.\n"
         "Voice samples (match this tone — direct, specific, lowercase-ok, no hype):\n"
-        f"{samples}\n\n"
+        f"{samples}\n"
+        f"{perf}\n"
         "Rules:\n"
         "- Write ONE post about what shipped and why it matters.\n"
         "- NEVER include a link or URL in the body. A link is added separately as a reply.\n"
@@ -65,6 +67,7 @@ def generate_draft(
     llm: LLMClient | None = None,
     *,
     first_reply_link: str | None = None,
+    hints: str | None = None,
 ) -> int:
     """Generate a draft for a meaningful git_event. Returns the draft id."""
     row = conn.execute(
@@ -83,7 +86,7 @@ def generate_draft(
     if llm is not None:
         text = llm.complete(
             model=config.models.draft,
-            system=_system_prompt(config),
+            system=_system_prompt(config, hints),
             user=f"Change summary:\n{summary}",
             max_tokens=400,
         )
@@ -126,10 +129,14 @@ def generate_draft(
 
 
 def generate_pending(
-    conn: sqlite3.Connection, config: Config, llm: LLMClient | None = None
+    conn: sqlite3.Connection,
+    config: Config,
+    llm: LLMClient | None = None,
+    *,
+    hints: str | None = None,
 ) -> list[int]:
     """Generate drafts for all meaningful, unconsumed git_events."""
     rows = conn.execute(
         "SELECT id FROM git_events WHERE is_meaningful = 1 AND consumed = 0 ORDER BY id"
     ).fetchall()
-    return [generate_draft(conn, r["id"], config, llm) for r in rows]
+    return [generate_draft(conn, r["id"], config, llm, hints=hints) for r in rows]

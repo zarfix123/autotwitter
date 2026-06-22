@@ -4,9 +4,10 @@ A compliance-first personal X (Twitter) growth tool for building in public. It
 **fully automates original posting** (the only thing X's 2026 rules allow to be
 automated) and keeps a **real human in the loop** for every engagement action.
 
-> **Status:** Phase 1 (zero-touch posting core) and Phase 2 (growth engine +
-> Telegram approval + engagement gate) are implemented and tested (86 tests).
-> Phases 3–4 (analytics/feedback, hardening) are planned — see `Roadmap` below.
+> **Status:** Phases 1–3 implemented and tested (101 tests): zero-touch posting,
+> the growth engine + Telegram approval + engagement gate, and the analytics
+> feedback loop + live-reply notifier. Phase 4 (hardening) is planned — see
+> `Roadmap` below.
 
 ## The one rule that shapes everything
 
@@ -61,6 +62,26 @@ that sends an engagement, and every approval is a fresh per-item token. Follows 
 optional, low-capped (`max_follows_per_day`, `0` disables), and paced
 (`follow_min_spacing_minutes`), enforced in the gate.
 
+## How Phase 3 works (gets better + reacts in real time)
+
+```
+analytics_pull (owned reads) → snapshots → insights(top topics, best hours)
+   → hint into the content generator   (drafts lean toward what lands)
+   → preferred hours into the scheduler (timing leans toward what lands)
+
+live_reply_tick → a target just posted (fresh)? → draft a reply now
+   → one-tap Telegram push → [your tap] → engagement gate → sent
+```
+
+- **Analytics feedback loop** (`analytics.py`) — periodically pulls your own posts'
+  metrics (cheap "owned" reads), stores a time series, and computes which topics and
+  posting hours perform best. Those signals are fed *softly* into drafting and timing
+  (only once there's enough data, so it doesn't over-fit). Deterministic, no LLM.
+- **Live-reply notifier** (`live_reply.py`) — checks high-value target accounts every
+  few minutes; when one posts something brand-new, it drafts a reply immediately and
+  pushes a single one-tap approval, so a timely reply can land while the post is still
+  climbing. It only reads and drafts — sending still goes through the same gate.
+
 ## Setup
 
 Requires Python 3.11+.
@@ -88,7 +109,8 @@ PYTHONPATH=src python -m xgrowth.app
 
 This runs the async loop: the Telegram approval bot (if configured), the scheduler
 jobs (`watch_cycle`/30m, `post_tick`/1m, `monitor_scan`/configurable,
-`reply_reminder`/daily-jittered), and the FastAPI admin server in a thread.
+`reply_reminder`/daily-jittered, `analytics_pull`/configurable,
+`live_reply_tick`/configurable), and the FastAPI admin server in a thread.
 
 Admin endpoints (default `http://127.0.0.1:8080`):
 
@@ -125,7 +147,7 @@ Polling needs no inbound port. Run the process under systemd or Docker with the
 ## Develop
 
 ```bash
-PYTHONPATH=src python -m pytest -q     # 86 tests, no network/keys needed
+PYTHONPATH=src python -m pytest -q     # 101 tests, no network/keys needed
 python -m ruff check .                  # lint
 ```
 
@@ -141,8 +163,8 @@ the decision logic is tested without it.
 - **Phase 2 — done:** read-only monitor + reply drafter + Telegram approval bot + the
   engagement gate (per-item human approval tokens) + paced follow candidates +
   static guardrail test.
-- **Phase 3:** analytics feedback loop + live-reply notifier.
-- **Phase 4:** hardening — static no-auto-engagement assertions, observability,
-  cost dashboard, docs.
+- **Phase 3 — done:** analytics pull + feedback into the generator/scheduler +
+  live-reply notifier.
+- **Phase 4:** hardening — expanded guardrail/observability, cost dashboard, docs.
 
 See `/root/.claude/plans/x-growth-engine-structured-waffle.md` for the full plan.

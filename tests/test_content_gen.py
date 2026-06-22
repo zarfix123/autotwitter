@@ -63,6 +63,18 @@ def test_event_marked_consumed_and_not_regenerated(conn, config, fake_llm):
         content_gen.generate_draft(conn, event_id, config, fake_llm)
 
 
+def test_hints_reach_system_prompt(conn, config, fake_llm):
+    event_id = _make_event(conn)
+    content_gen.generate_draft(conn, event_id, config, fake_llm, hints="top topics — AI")
+    assert any("top topics — AI" in c["system"] for c in fake_llm.calls)
+
+
+def test_no_hints_no_performance_line(conn, config, fake_llm):
+    event_id = _make_event(conn)
+    content_gen.generate_draft(conn, event_id, config, fake_llm)
+    assert all("Performance signal" not in c["system"] for c in fake_llm.calls)
+
+
 def test_generate_pending_only_meaningful_unconsumed(conn, config, fake_llm):
     _make_event(conn)  # meaningful, unconsumed
     conn.execute(

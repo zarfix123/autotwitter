@@ -27,7 +27,7 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
-from . import db, monitor, pipeline, reply_drafter
+from . import analytics, db, live_reply, monitor, pipeline, reply_drafter
 from . import poster as poster_mod
 from .config import Config, Secrets, load_config, load_secrets
 from .engagement import DryRunXEngager, RealXEngager, XEngager
@@ -140,7 +140,11 @@ async def main_async() -> None:
     def _watch_cycle() -> None:
         c = conn_factory()
         try:
-            pipeline.watch_and_draft(c, config, source, classifier, llm, now=_now())
+            ins = analytics.insights(c)  # feedback into drafting + timing
+            pipeline.watch_and_draft(
+                c, config, source, classifier, llm,
+                now=_now(), hints=ins.hint_text or None, preferred_hours=ins.best_hours or None,
+            )
         finally:
             c.close()
 
@@ -159,6 +163,13 @@ async def main_async() -> None:
         finally:
             c.close()
 
+    def _analytics_pull() -> None:
+        c = conn_factory()
+        try:
+            analytics.pull(c, config, reader, now=_now())
+        finally:
+            c.close()
+
     async def watch_cycle() -> None:
         await asyncio.to_thread(_watch_cycle)
 
@@ -168,10 +179,14 @@ async def main_async() -> None:
     async def monitor_scan() -> None:
         await asyncio.to_thread(_monitor_scan)
 
+    async def analytics_pull() -> None:
+        await asyncio.to_thread(_analytics_pull)
+
     # ---- Telegram bot (optional; only if configured) ----
     application = None
+    live_reply_tick = None
     if secrets.telegram_bot_token and secrets.telegram_allowed_user_id:
-        from .telegram_bot import build_application, push_batch
+        from .telegram_bot import build_application, push_batch, push_single_reply
 
         application = build_application(
             bot_token=secrets.telegram_bot_token,
@@ -180,6 +195,7 @@ async def main_async() -> None:
             config=config,
             engager=engager,
         )
+        chat_id = secrets.telegram_allowed_user_id
 
         async def reply_reminder() -> None:
             # Jitter within the reminder window so the session time isn't mechanical.
@@ -190,9 +206,23 @@ async def main_async() -> None:
                     - windows[0].start.hour * 60 - windows[0].start.minute
                 )
                 await asyncio.sleep(random.randint(0, max(span, 0)) * 60)
-            await push_batch(
-                application, secrets.telegram_allowed_user_id, conn_factory, config
-            )
+            await push_batch(application, chat_id, conn_factory, config)
+
+        async def live_reply_tick() -> None:
+            def _scan() -> list[int]:
+                c = conn_factory()
+                try:
+                    return live_reply.scan_live(c, config, reader, llm, now=_now())
+                finally:
+                    c.close()
+
+            new_ids = await asyncio.to_thread(_scan)
+            for draft_id in new_ids:
+                c = conn_factory()
+                try:
+                    await push_single_reply(application.bot, chat_id, c, draft_id)
+                finally:
+                    c.close()
     else:
         logger.info("Telegram not configured; approval bot disabled.")
         reply_reminder = None
@@ -207,6 +237,9 @@ async def main_async() -> None:
     sched.add_job(
         monitor_scan, "interval", minutes=config.monitor_scan_interval_minutes, id="monitor_scan"
     )
+    sched.add_job(
+        analytics_pull, "interval", hours=config.analytics_pull_interval_hours, id="analytics_pull"
+    )
     if reply_reminder is not None:
         windows = parse_windows([config.reply_reminder_window])
         start = windows[0].start if windows else datetime.now().time().replace(hour=12, minute=0)
@@ -214,6 +247,13 @@ async def main_async() -> None:
             reply_reminder,
             CronTrigger(hour=start.hour, minute=start.minute),
             id="reply_reminder",
+        )
+    if live_reply_tick is not None:
+        sched.add_job(
+            live_reply_tick,
+            "interval",
+            minutes=config.live_reply_interval_minutes,
+            id="live_reply_tick",
         )
 
     _start_admin_thread(secrets)

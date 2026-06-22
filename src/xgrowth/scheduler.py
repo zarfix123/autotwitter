@@ -46,16 +46,18 @@ def parse_windows(specs: list[str]) -> list[Window]:
 
 
 def _day_anchors(day: date, windows: list[Window], config: Config, tzinfo) -> list[Slot]:
-    """Up to posts_per_day anchor slots for one day, respecting in-window spacing."""
+    """All candidate anchor slots for one day (every window, spaced in-window).
+
+    The per-day cap is enforced later in the assignment loop, so we expose all
+    anchors here — that lets preferred-hours pruning choose *which* windows to use.
+    """
     anchors: list[Slot] = []
     spacing = timedelta(minutes=config.min_post_spacing_minutes)
     for w in windows:
-        if len(anchors) >= config.posts_per_day:
-            break
         start_dt = datetime.combine(day, w.start, tzinfo=tzinfo)
         end_dt = datetime.combine(day, w.end, tzinfo=tzinfo)
         cursor = start_dt
-        while cursor <= end_dt and len(anchors) < config.posts_per_day:
+        while cursor <= end_dt:
             anchors.append(Slot(when=cursor, window_end=end_dt))
             cursor = cursor + spacing
     return anchors
@@ -90,8 +92,14 @@ def schedule_pending(
     now: datetime,
     jitter_fn: JitterFn | None = None,
     horizon_days: int = 14,
+    preferred_hours: list[int] | None = None,
 ) -> list[tuple[int, datetime]]:
-    """Assign every 'draft'-status row a future send time. Returns (draft_id, when)."""
+    """Assign every 'draft'-status row a future send time. Returns (draft_id, when).
+
+    ``preferred_hours`` (best-first, from analytics) biases *which* window-anchors a
+    day exposes when it has more than ``posts_per_day`` of them; assignment within a
+    day stays chronological so spacing/cap logic is unchanged. None = no bias.
+    """
     jitter_fn = jitter_fn or random.randint
     windows = parse_windows(config.posting_windows)
     if not windows:
@@ -107,10 +115,20 @@ def schedule_pending(
     last_time: datetime | None = max(existing) if existing else None
 
     # Build the chronological list of candidate anchor slots across the horizon.
+    pref = {h: i for i, h in enumerate(preferred_hours or [])}
     candidates: list[Slot] = []
     for offset in range(horizon_days):
         day = (now + timedelta(days=offset)).date()
-        candidates.extend(_day_anchors(day, windows, config, tzinfo))
+        day_anchors = _day_anchors(day, windows, config, tzinfo)
+        if preferred_hours:
+            # Keep this day's most-preferred anchors (up to the cap), then re-order
+            # them chronologically for assignment.
+            day_anchors = sorted(
+                day_anchors,
+                key=lambda s: (pref.get(s.when.hour, len(pref)), s.when),
+            )[: config.posts_per_day]
+            day_anchors.sort(key=lambda s: s.when)
+        candidates.extend(day_anchors)
     candidates.sort(key=lambda s: s.when)
 
     assigned: list[tuple[int, datetime]] = []

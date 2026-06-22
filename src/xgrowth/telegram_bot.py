@@ -232,3 +232,27 @@ async def push_batch(
         await _send_batch(application.bot, chat_id, conn, config)
     finally:
         conn.close()
+
+
+async def push_single_reply(bot: Any, chat_id: int, conn: sqlite3.Connection, draft_id: int) -> None:
+    """Live notifier: push one fresh reply draft with Approve/Skip (outside the batch)."""
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+    row = conn.execute(
+        "SELECT rd.id, rd.text, ro.author_handle, ro.text AS post_text "
+        "FROM reply_drafts rd JOIN reply_opportunities ro ON ro.id = rd.opportunity_id "
+        "WHERE rd.id = ? AND rd.status = 'draft'",
+        (draft_id,),
+    ).fetchone()
+    if row is None:
+        return
+    text = (
+        f"⚡ LIVE reply to @{row['author_handle']} (fresh post):\n"
+        f"> {row['post_text'][:200]}\n\n"
+        f"Draft:\n{row['text']}"
+    )
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Approve", callback_data=make_callback("approve", "reply", row["id"])),
+        InlineKeyboardButton("❌ Skip", callback_data=make_callback("skip", "reply", row["id"])),
+    ]])
+    await bot.send_message(chat_id=chat_id, text=text, reply_markup=kb)

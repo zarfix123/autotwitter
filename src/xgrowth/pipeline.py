@@ -36,11 +36,17 @@ def watch_and_draft(
     llm: LLMClient | None,
     *,
     now: datetime,
+    hints: str | None = None,
+    preferred_hours: list[int] | None = None,
 ) -> tuple[list[int], list[int], list[tuple[int, datetime]]]:
-    """Poll repos, draft meaningful events, and schedule the drafts."""
+    """Poll repos, draft meaningful events, and schedule the drafts.
+
+    ``hints``/``preferred_hours`` (from analytics.insights) softly steer drafting and
+    timing; both default to None so behavior is unchanged without analytics.
+    """
     new_events = git_watcher.run(conn, config, source, classifier)
-    new_drafts = content_gen.generate_pending(conn, config, llm)
-    scheduled = schedule_pending(conn, config, now=now)
+    new_drafts = content_gen.generate_pending(conn, config, llm, hints=hints)
+    scheduled = schedule_pending(conn, config, now=now, preferred_hours=preferred_hours)
     return new_events, new_drafts, scheduled
 
 

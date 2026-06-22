@@ -63,6 +63,19 @@ max_follows_per_day: 2
 # approved follows never go out as a burst.
 follow_min_spacing_minutes: 240
 
+# --- Phase 3: feedback & timeliness ---
+# How often to pull our own posts' performance (hours). Cheap owned reads; the
+# learned topics/times feed back into drafting + scheduling.
+analytics_pull_interval_hours: 6
+
+# Live-reply notifier: how often to check target accounts for a brand-new post.
+live_reply_interval_minutes: 10
+# Only treat a target post as "live" if it's newer than this (minutes) — being an
+# early reply on a climbing post is where the visibility is.
+live_reply_max_age_minutes: 15
+# Optional follower floor for live-reply targets (0 = every target account).
+live_reply_min_followers: 0
+
 # Whether I have X Premium (affects expected reach, not behavior).
 x_premium: false
 
