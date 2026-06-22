@@ -8,28 +8,18 @@ with a link in it costs ~13x more on the X API and loses 50-90% of reach.
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 
 from . import audit
 from .config import Config
 from .llm import LLMClient
+from .textfmt import contains_url, strip_urls
 
-_URL_RE = re.compile(r"https?://\S+|\bwww\.\S+|\b[\w.\-]+\.(?:com|io|dev|ai|app|org|net|co)\b/\S*")
-_MAX_LEN_STANDARD = 280
-_MAX_LEN_PREMIUM = 4000
+__all__ = ["contains_url", "strip_urls", "generate_draft", "generate_pending"]
 
 
 class BodyContainsURLError(ValueError):
     """Raised if a generated post body contains a URL (links go in the first reply)."""
-
-
-def contains_url(text: str) -> bool:
-    return _URL_RE.search(text) is not None
-
-
-def strip_urls(text: str) -> str:
-    return _URL_RE.sub("", text).strip()
 
 
 def repo_url(repo_full_name: str) -> str:
@@ -37,7 +27,9 @@ def repo_url(repo_full_name: str) -> str:
 
 
 def _max_len(config: Config) -> int:
-    return _MAX_LEN_PREMIUM if config.x_premium else _MAX_LEN_STANDARD
+    from .textfmt import max_len
+
+    return max_len(config.x_premium)
 
 
 def _system_prompt(config: Config) -> str:

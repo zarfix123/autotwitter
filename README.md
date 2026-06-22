@@ -4,9 +4,9 @@ A compliance-first personal X (Twitter) growth tool for building in public. It
 **fully automates original posting** (the only thing X's 2026 rules allow to be
 automated) and keeps a **real human in the loop** for every engagement action.
 
-> **Status:** Phase 1 (zero-touch posting core) is implemented and tested.
-> Phases 2–4 (Telegram approval + engagement gate, analytics/feedback, hardening)
-> are planned — see `Roadmap` below.
+> **Status:** Phase 1 (zero-touch posting core) and Phase 2 (growth engine +
+> Telegram approval + engagement gate) are implemented and tested (86 tests).
+> Phases 3–4 (analytics/feedback, hardening) are planned — see `Roadmap` below.
 
 ## The one rule that shapes everything
 
@@ -14,12 +14,17 @@ X bans accounts on *behavioral patterns*, regardless of who clicked a button. So
 this tool **never** auto-likes/follows/replies/reposts/DMs. That isn't a flag — it
 is structural:
 
-- The only X write surface in Phase 1 (`x_client.XPoster`) can post original
-  tweets and reply **to our own** tweet (for the link-in-first-reply). It has no
-  ability to touch other accounts.
-- Engagement (replying to others, following) will arrive in Phase 2 behind an
-  **engagement gate** that requires a fresh, single-use, per-item human approval
-  token minted only by a real Telegram tap. No "agent approves the queue" mode.
+There are **three separate X surfaces**, and the separation *is* the safety model:
+
+- `x_client.XPoster` (original posting) — original tweets + reply to **our own**
+  tweet only. No other-account interaction.
+- `x_read.XReader` (read-only) — search/timelines/user lookups. Cannot post or engage.
+- `engagement.XEngager` (reply-to-others, follow) — reachable **only** through
+  `engagement_gate`, which requires a fresh, single-use, item-bound approval token.
+  Tokens are minted **only** by a real Telegram tap from the allow-listed user
+  (`mint_approval_token`), enforced item-by-item. There is no "agent/script approves
+  the queue" mode, and a static test (`tests/test_guardrail.py`) fails CI if any
+  engagement endpoint, the gate, or token-minting leaks outside those modules.
 
 Other guardrails already in place: secrets are scrubbed out of repo content before
 anything reaches Claude or a draft; links go in the first reply (never the body);
@@ -38,6 +43,23 @@ GitHub commits ─poll→ Git Watcher ─scrub+classify(Haiku)→ git_event (ded
 It polls each watched repo's commits (no tags/releases/PRs needed), clusters new
 commits, asks the cheap model whether they're a meaningful build-in-public moment,
 drafts a post in your voice, schedules it into your active windows, and posts it.
+
+## How Phase 2 works (the 5-minutes-a-day layer)
+
+```
+Monitor (read-only) ─rank(Haiku)→ reply_opportunities ─→ Reply Drafter (Sonnet)
+   → Telegram daily push (Approve / Skip buttons)
+   → Approve tap → mint token → engagement_gate → reply/follow sent (one action)
+   → Skip tap   → discarded; nothing sent
+```
+
+The monitor reads target accounts + keyword searches, ranks by relevance ×
+freshness × account size, and queues opportunities — it never acts. Claude drafts a
+sharp, specific reply for each. Once a day (at a jittered time) the Telegram bot
+sends you the batch; you approve or skip with one tap. Approving is the *only* path
+that sends an engagement, and every approval is a fresh per-item token. Follows are
+optional, low-capped (`max_follows_per_day`, `0` disables), and paced
+(`follow_min_spacing_minutes`), enforced in the gate.
 
 ## Setup
 
@@ -64,8 +86,9 @@ cp config.example.yaml config.yaml        # edit repos, voice, windows, cadence
 PYTHONPATH=src python -m xgrowth.app
 ```
 
-This starts the FastAPI admin server and the APScheduler loops
-(`watch_cycle` every 30 min, `post_tick` every minute).
+This runs the async loop: the Telegram approval bot (if configured), the scheduler
+jobs (`watch_cycle`/30m, `post_tick`/1m, `monitor_scan`/configurable,
+`reply_reminder`/daily-jittered), and the FastAPI admin server in a thread.
 
 Admin endpoints (default `http://127.0.0.1:8080`):
 
@@ -75,6 +98,17 @@ Admin endpoints (default `http://127.0.0.1:8080`):
 | GET    | `/status`       | counts + weekly spend + paused flag           |
 | POST   | `/admin/kill`   | **kill switch**: pause posting, clear queue   |
 | POST   | `/admin/resume` | unpause                                        |
+
+### Telegram approval bot
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) → put the token in
+   `TELEGRAM_BOT_TOKEN`. Message your bot once, then set `TELEGRAM_ALLOWED_USER_ID`
+   to your numeric Telegram user id (only that user can approve or command the bot).
+2. The bot DMs you a daily batch of drafted replies (and any follow candidates) with
+   Approve/Skip buttons. Commands: `/status`, `/queue`, `/now` (push the batch on
+   demand), `/kill`, `/resume`. All restricted to the allow-listed user.
+3. In `XGROWTH_DRY_RUN=1` the engager is a no-op, so you can do the full approval
+   round-trip without sending anything live.
 
 ### Going live
 
@@ -91,19 +125,22 @@ Polling needs no inbound port. Run the process under systemd or Docker with the
 ## Develop
 
 ```bash
-PYTHONPATH=src python -m pytest -q     # 48 tests, no network/keys needed
+PYTHONPATH=src python -m pytest -q     # 86 tests, no network/keys needed
 python -m ruff check .                  # lint
 ```
 
-The LLM, GitHub source, and X poster are all injectable, so the whole pipeline
-runs offline in tests via fakes.
+The LLM, GitHub source, and all three X surfaces (poster, reader, engager) are
+injectable, so the whole pipeline — including the approval round-trip — runs offline
+in tests via fakes. `python-telegram-bot` is only needed to actually run the bot;
+the decision logic is tested without it.
 
 ## Roadmap
 
 - **Phase 1 — done:** git watcher, secret scrubber, content generator, scheduler,
   poster, audit log, cost tracker, kill switch.
-- **Phase 2:** read-only monitor + reply drafter + Telegram approval bot + the
-  engagement gate (per-item human approval tokens) + paced follow candidates.
+- **Phase 2 — done:** read-only monitor + reply drafter + Telegram approval bot + the
+  engagement gate (per-item human approval tokens) + paced follow candidates +
+  static guardrail test.
 - **Phase 3:** analytics feedback loop + live-reply notifier.
 - **Phase 4:** hardening — static no-auto-engagement assertions, observability,
   cost dashboard, docs.

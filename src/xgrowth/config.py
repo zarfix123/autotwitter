@@ -47,6 +47,11 @@ class Config:
     max_follows_per_day: int = 2
     x_premium: bool = False
     weekly_cost_cap_usd: float = 15.0
+    # Phase 2 (growth engine) tunables.
+    reply_reminder_window: str = "12:00-13:00"
+    monitor_scan_interval_minutes: int = 30
+    opportunity_max_age_minutes: int = 120
+    follow_min_spacing_minutes: int = 240
     models: Models = field(default_factory=Models)
 
     # ---- validation helpers -------------------------------------------------
@@ -114,6 +119,10 @@ def config_from_dict(raw: dict) -> Config:
         max_follows_per_day=int(raw.get("max_follows_per_day", 2)),
         x_premium=bool(raw.get("x_premium", False)),
         weekly_cost_cap_usd=float(raw.get("weekly_cost_cap_usd", 15.0)),
+        reply_reminder_window=str(raw.get("reply_reminder_window", "12:00-13:00")),
+        monitor_scan_interval_minutes=int(raw.get("monitor_scan_interval_minutes", 30)),
+        opportunity_max_age_minutes=int(raw.get("opportunity_max_age_minutes", 120)),
+        follow_min_spacing_minutes=int(raw.get("follow_min_spacing_minutes", 240)),
         models=models,
     )
 

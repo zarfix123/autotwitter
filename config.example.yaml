@@ -46,8 +46,22 @@ post_jitter_minutes: 25         # randomize exact send time +/- this many minute
 # Reply queue (Phase 2)
 daily_reply_queue_size: 5  # default 5, adjustable up to ~15
 
+# When the daily approval reminder fires (local HH:MM-HH:MM). A jittered time is
+# picked inside this window each day so the session reminder isn't mechanical.
+reply_reminder_window: "12:00-13:00"
+
+# How often the read-only monitor scans for reply opportunities (minutes).
+monitor_scan_interval_minutes: 30
+
+# Opportunities older than this are dropped/expired — being an early reply on a
+# climbing post is where the visibility is, so we favor fresh posts.
+opportunity_max_age_minutes: 120
+
 # Follows (Phase 2) — keep low and paced. 0 disables follow suggestions entirely.
 max_follows_per_day: 2
+# Minimum spacing between approved follows (minutes), enforced in the gate so
+# approved follows never go out as a burst.
+follow_min_spacing_minutes: 240
 
 # Whether I have X Premium (affects expected reach, not behavior).
 x_premium: false

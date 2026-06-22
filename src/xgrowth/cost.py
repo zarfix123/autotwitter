@@ -28,6 +28,8 @@ X_PRICES: dict[str, float] = {
     "post_read": 0.005,
     "user_read": 0.010,
     "owned_read": 0.001,  # own posts / followers
+    # X publishes no per-call figure for follows; treat as a write and estimate.
+    "follow": 0.010,
 }
 
 
