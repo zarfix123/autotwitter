@@ -1,0 +1,23 @@
+# Never bake secrets or local state into the image.
+.env
+config.yaml
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Repo cruft not needed at runtime.
+.git/
+.gitignore
+tests/
+requirements-dev.txt
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+*.md
+!README.md

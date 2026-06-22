@@ -141,8 +141,8 @@ Admin endpoints (default `http://127.0.0.1:8080`):
 
 ### Deploy (any cheap always-on instance, e.g. AWS Lightsail/EC2)
 
-Polling needs no inbound port. Run the process under systemd or Docker with the
-`.env` and `config.yaml` mounted, and a persistent volume for `data/xgrowth.db`.
+Polling needs no inbound port. Ship it with Docker (`docker compose up -d`) or
+systemd — both are covered, with a first-run dry-run smoke test, in **[DEPLOY.md](DEPLOY.md)**.
 
 ## Develop
 
@@ -165,6 +165,8 @@ the decision logic is tested without it.
   static guardrail test.
 - **Phase 3 — done:** analytics pull + feedback into the generator/scheduler +
   live-reply notifier.
-- **Phase 4:** hardening — expanded guardrail/observability, cost dashboard, docs.
+- **Phase 4 (deploy slice) — done:** Dockerfile, docker-compose, systemd unit, and the
+  [DEPLOY.md](DEPLOY.md) runbook. Further hardening (cost dashboard, structured logging,
+  expanded guardrail assertions) deferred until needed.
 
 See `/root/.claude/plans/x-growth-engine-structured-waffle.md` for the full plan.

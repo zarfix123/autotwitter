@@ -1,0 +1,19 @@
+services:
+  xgrowth:
+    build: .
+    image: xgrowth:latest
+    container_name: xgrowth
+    env_file: .env
+    volumes:
+      # Config is read-only; the SQLite state lives in a persisted volume.
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    restart: unless-stopped
+    # The app needs only OUTBOUND network (GitHub/X/Claude polling + Telegram
+    # long-poll), so no published ports are required. Telegram is the control
+    # surface; the FastAPI admin API stays internal by default.
+    #
+    # To reach the admin API from the host, also set XGROWTH_HOST=0.0.0.0 in .env
+    # and uncomment:
+    # ports:
+    #   - "127.0.0.1:8080:8080"
