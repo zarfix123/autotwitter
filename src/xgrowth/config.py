@@ -1,0 +1,143 @@
+"""Configuration loading.
+
+All tunable behavior lives in a YAML file (see config.example.yaml) plus secrets
+from the environment (.env). Modules read a typed `Config` object; nothing is
+hardcoded.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import yaml
+
+
+@dataclass(frozen=True)
+class Repo:
+    owner: str
+    name: str
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.owner}/{self.name}"
+
+
+@dataclass(frozen=True)
+class Models:
+    classify: str = "claude-haiku-4-5"
+    draft: str = "claude-sonnet-4-6"
+    polish: str = "claude-opus-4-8"
+
+
+@dataclass(frozen=True)
+class Config:
+    repos: list[Repo]
+    github_author: str
+    topic_clusters: list[str]
+    target_accounts: list[str]
+    keywords: list[str]
+    voice_samples: list[str]
+    posting_windows: list[str]
+    posts_per_day: int = 2
+    min_post_spacing_minutes: int = 180
+    post_jitter_minutes: int = 25
+    daily_reply_queue_size: int = 5
+    max_follows_per_day: int = 2
+    x_premium: bool = False
+    weekly_cost_cap_usd: float = 15.0
+    models: Models = field(default_factory=Models)
+
+    # ---- validation helpers -------------------------------------------------
+    def __post_init__(self) -> None:
+        if self.posts_per_day < 1:
+            raise ValueError("posts_per_day must be >= 1")
+        if self.posts_per_day > 4:
+            # Posting more dilutes reach; the plan caps the configurable max at 4.
+            raise ValueError("posts_per_day must be <= 4 (more dilutes reach)")
+        if self.daily_reply_queue_size < 1 or self.daily_reply_queue_size > 15:
+            raise ValueError("daily_reply_queue_size must be in 1..15")
+        if self.min_post_spacing_minutes < 30:
+            raise ValueError("min_post_spacing_minutes must be >= 30")
+
+
+@dataclass(frozen=True)
+class Secrets:
+    anthropic_api_key: str | None
+    github_token: str | None
+    x_client_id: str | None
+    x_client_secret: str | None
+    x_access_token: str | None
+    x_refresh_token: str | None
+    telegram_bot_token: str | None
+    telegram_allowed_user_id: int | None
+    db_path: str
+    config_path: str
+    dry_run: bool
+    host: str
+    port: int
+
+
+def load_config(path: str | os.PathLike[str] | None = None) -> Config:
+    """Load and validate the YAML config."""
+    cfg_path = Path(path or os.environ.get("XGROWTH_CONFIG_PATH", "config.yaml"))
+    if not cfg_path.exists():
+        raise FileNotFoundError(
+            f"Config not found at {cfg_path}. Copy config.example.yaml to config.yaml."
+        )
+    raw = yaml.safe_load(cfg_path.read_text()) or {}
+    return config_from_dict(raw)
+
+
+def config_from_dict(raw: dict) -> Config:
+    """Build a Config from a plain dict (used by load_config and tests)."""
+    repos = [Repo(owner=r["owner"], name=r["name"]) for r in raw.get("repos", [])]
+    models_raw = raw.get("models", {}) or {}
+    models = Models(
+        classify=models_raw.get("classify", Models.classify),
+        draft=models_raw.get("draft", Models.draft),
+        polish=models_raw.get("polish", Models.polish),
+    )
+    return Config(
+        repos=repos,
+        github_author=raw.get("github_author", ""),
+        topic_clusters=list(raw.get("topic_clusters", [])),
+        target_accounts=list(raw.get("target_accounts", [])),
+        keywords=list(raw.get("keywords", [])),
+        voice_samples=list(raw.get("voice_samples", [])),
+        posting_windows=list(raw.get("posting_windows", [])),
+        posts_per_day=int(raw.get("posts_per_day", 2)),
+        min_post_spacing_minutes=int(raw.get("min_post_spacing_minutes", 180)),
+        post_jitter_minutes=int(raw.get("post_jitter_minutes", 25)),
+        daily_reply_queue_size=int(raw.get("daily_reply_queue_size", 5)),
+        max_follows_per_day=int(raw.get("max_follows_per_day", 2)),
+        x_premium=bool(raw.get("x_premium", False)),
+        weekly_cost_cap_usd=float(raw.get("weekly_cost_cap_usd", 15.0)),
+        models=models,
+    )
+
+
+def _int_or_none(value: str | None) -> int | None:
+    if value is None or value.strip() == "":
+        return None
+    return int(value)
+
+
+def load_secrets() -> Secrets:
+    """Read secrets and runtime knobs from the environment."""
+    return Secrets(
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        github_token=os.environ.get("GITHUB_TOKEN"),
+        x_client_id=os.environ.get("X_CLIENT_ID"),
+        x_client_secret=os.environ.get("X_CLIENT_SECRET"),
+        x_access_token=os.environ.get("X_ACCESS_TOKEN"),
+        x_refresh_token=os.environ.get("X_REFRESH_TOKEN"),
+        telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN"),
+        telegram_allowed_user_id=_int_or_none(os.environ.get("TELEGRAM_ALLOWED_USER_ID")),
+        db_path=os.environ.get("XGROWTH_DB_PATH", "data/xgrowth.db"),
+        config_path=os.environ.get("XGROWTH_CONFIG_PATH", "config.yaml"),
+        dry_run=os.environ.get("XGROWTH_DRY_RUN", "1") not in ("0", "false", "False", ""),
+        host=os.environ.get("XGROWTH_HOST", "127.0.0.1"),
+        port=int(os.environ.get("XGROWTH_PORT", "8080")),
+    )

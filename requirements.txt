@@ -1,0 +1,9 @@
+anthropic>=0.40
+tweepy>=4.14
+requests>=2.31
+PyYAML>=6.0
+APScheduler>=3.10
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-dotenv>=1.0
+python-telegram-bot>=21.0
