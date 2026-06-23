@@ -14,7 +14,16 @@ Auth is OAuth 2.0 user context (never password login, never browser automation).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Protocol
+
+# Either a static token string (back-compat) or a provider that returns a current
+# token (auto-refresh). See x_auth.XTokenProvider.
+TokenSource = Callable[[], str] | str
+
+
+def _as_provider(token_source: TokenSource) -> Callable[[], str]:
+    return token_source if callable(token_source) else (lambda: token_source)
 
 
 class XPoster(Protocol):
@@ -50,22 +59,32 @@ class DryRunXPoster:
 class RealXPoster:
     """tweepy-backed poster using an OAuth 2.0 user-context access token.
 
-    The token must carry the ``tweet.write`` scope. Token refresh (OAuth 2.0
-    tokens expire) is handled by the caller/runtime, not here.
+    The token must carry the ``tweet.write`` scope. Accepts either a static token or
+    a provider callable (``x_auth.XTokenProvider.token``); the tweepy client is rebuilt
+    whenever the provider hands back a refreshed token, so posting survives expiry.
     """
 
-    def __init__(self, oauth2_user_access_token: str) -> None:
+    def __init__(self, token_source: TokenSource) -> None:
+        self._provider = _as_provider(token_source)
+        self._token: str | None = None
+        self._client = None
+
+    def _client_for_current_token(self):
         import tweepy  # lazy
 
-        # user_auth=False on calls => use this OAuth 2.0 user token as the bearer.
-        self._client = tweepy.Client(bearer_token=oauth2_user_access_token)
+        tok = self._provider()
+        if tok != self._token or self._client is None:
+            self._token = tok
+            # user_auth=False on calls => use this OAuth 2.0 user token as the bearer.
+            self._client = tweepy.Client(bearer_token=tok)
+        return self._client
 
     def create_tweet(self, text: str) -> str:
-        resp = self._client.create_tweet(text=text, user_auth=False)
+        resp = self._client_for_current_token().create_tweet(text=text, user_auth=False)
         return str(resp.data["id"])
 
     def reply_to_own(self, text: str, our_tweet_id: str) -> str:
-        resp = self._client.create_tweet(
+        resp = self._client_for_current_token().create_tweet(
             text=text, in_reply_to_tweet_id=our_tweet_id, user_auth=False
         )
         return str(resp.data["id"])

@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS drafts (
     posted_tweet_id  TEXT,
     reply_tweet_id   TEXT,
     model            TEXT,
+    topic            TEXT,                           -- own topic for source-less (AI-news) drafts
     created_at       TEXT NOT NULL,
     FOREIGN KEY (git_event_id) REFERENCES git_events(id)
 );
@@ -128,6 +129,22 @@ CREATE TABLE IF NOT EXISTS analytics (
     replies     INTEGER,
     fetched_at  TEXT NOT NULL
 );
+
+-- AI-news content source: trending stories discovered for opinion/tie-in posts.
+CREATE TABLE IF NOT EXISTS news_items (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id         TEXT NOT NULL UNIQUE,   -- source id (e.g. HN objectID); dedup key
+    source          TEXT NOT NULL DEFAULT 'hn',
+    title           TEXT NOT NULL,
+    url             TEXT NOT NULL,          -- article URL (-> first_reply_link)
+    points          INTEGER NOT NULL DEFAULT 0,
+    num_comments    INTEGER NOT NULL DEFAULT 0,
+    topic           TEXT,
+    is_meaningful   INTEGER NOT NULL DEFAULT 0,
+    consumed        INTEGER NOT NULL DEFAULT 0,  -- 1 once a draft has been generated
+    item_created_at TEXT,                   -- when the story was posted at the source
+    created_at      TEXT NOT NULL           -- when we ingested it
+);
 """
 
 
@@ -144,9 +161,17 @@ def connect(db_path: str) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    """Create all tables idempotently."""
+    """Create all tables idempotently, then run lightweight column migrations."""
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns to existing tables that predate them (SQLite has no ADD COLUMN IF NOT EXISTS)."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(drafts)").fetchall()}
+    if "topic" not in cols:
+        conn.execute("ALTER TABLE drafts ADD COLUMN topic TEXT")
 
 
 # ---- settings (paused flag / kill switch state, cursors) --------------------

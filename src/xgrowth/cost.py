@@ -21,6 +21,10 @@ CLAUDE_PRICES: dict[str, tuple[float, float]] = {
     "claude-opus-4-8": (5.0, 25.0),
 }
 
+# Claude server-side web search: USD per search invocation. Roughly $10 / 1k
+# searches at time of writing — confirm against the current catalog before go-live.
+SEARCH_PRICE_PER_USE = 0.01
+
 # X API: USD per call (from the brief's 2026 pay-per-use rates).
 X_PRICES: dict[str, float] = {
     "post_create": 0.015,
@@ -62,6 +66,13 @@ def record_x(conn: sqlite3.Connection, op: str, count: int = 1) -> float:
     unit = X_PRICES.get(op, 0.0)
     cost = unit * count
     _insert(conn, "x", op, count, cost)
+    return cost
+
+
+def record_search(conn: sqlite3.Connection, model: str, count: int = 1) -> float:
+    """Record Claude web-search usage (billed per search) and return its USD cost."""
+    cost = SEARCH_PRICE_PER_USE * count
+    _insert(conn, "claude", f"web_search:{model}", count, cost)
     return cost
 
 

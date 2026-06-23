@@ -91,7 +91,7 @@ def _latest_snapshots(conn: sqlite3.Connection) -> dict[str, float]:
 def _topic_and_hour(conn: sqlite3.Connection) -> dict[str, tuple[str | None, int | None]]:
     """tweet_id -> (topic, posted hour) for original posts."""
     rows = conn.execute(
-        "SELECT ph.tweet_id, ge.topic AS topic, ph.posted_at AS posted_at "
+        "SELECT ph.tweet_id, COALESCE(d.topic, ge.topic) AS topic, ph.posted_at AS posted_at "
         "FROM posted_history ph "
         "LEFT JOIN drafts d ON d.id = ph.draft_id "
         "LEFT JOIN git_events ge ON ge.id = d.git_event_id "

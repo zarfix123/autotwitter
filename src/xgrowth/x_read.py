@@ -12,10 +12,14 @@ rolling 15-minute windows are respected with backoff.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
 from . import cost
+
+# A static token string or a provider that returns a current token (auto-refresh).
+TokenSource = Callable[[], str] | str
 
 
 @dataclass
@@ -79,18 +83,28 @@ class FakeXReader:
 class RealXReader:
     """tweepy-backed read-only client (OAuth 2.0 bearer / user token)."""
 
-    def __init__(self, token: str, conn: sqlite3.Connection | None = None) -> None:
+    def __init__(self, token_source: TokenSource, conn: sqlite3.Connection | None = None) -> None:
+        self._provider = token_source if callable(token_source) else (lambda: token_source)
+        self._token: str | None = None
+        self._client = None
+        self._conn = conn
+
+    def _c(self):
+        """Current tweepy client, rebuilt when the provider returns a refreshed token."""
         import tweepy  # lazy
 
-        self._client = tweepy.Client(bearer_token=token, wait_on_rate_limit=True)
-        self._conn = conn
+        tok = self._provider()
+        if tok != self._token or self._client is None:
+            self._token = tok
+            self._client = tweepy.Client(bearer_token=tok, wait_on_rate_limit=True)
+        return self._client
 
     def _record(self, op: str, count: int) -> None:
         if self._conn is not None and count:
             cost.record_x(self._conn, op, count)
 
     def search_recent(self, query: str, max_results: int = 10) -> list[Tweet]:
-        resp = self._client.search_recent_tweets(
+        resp = self._c().search_recent_tweets(
             query=query,
             max_results=max(10, min(max_results, 100)),
             tweet_fields=["created_at", "author_id"],
@@ -101,11 +115,11 @@ class RealXReader:
         return self._to_tweets(resp)
 
     def user_recent(self, handle: str, max_results: int = 5) -> list[Tweet]:
-        user = self._client.get_user(username=handle, user_auth=False)
+        user = self._c().get_user(username=handle, user_auth=False)
         self._record("user_read", 1)
         if not user.data:
             return []
-        resp = self._client.get_users_tweets(
+        resp = self._c().get_users_tweets(
             id=user.data.id,
             max_results=max(5, min(max_results, 100)),
             tweet_fields=["created_at", "author_id"],
@@ -118,7 +132,7 @@ class RealXReader:
     def follower_counts(self, handles: list[str]) -> dict[str, int]:
         if not handles:
             return {}
-        resp = self._client.get_users(
+        resp = self._c().get_users(
             usernames=handles, user_fields=["public_metrics"], user_auth=False
         )
         self._record("user_read", len(handles))
@@ -132,7 +146,7 @@ class RealXReader:
         out: dict[str, Metrics] = {}
         for i in range(0, len(tweet_ids), 100):  # API caps at 100 ids/call
             batch = tweet_ids[i : i + 100]
-            resp = self._client.get_tweets(
+            resp = self._c().get_tweets(
                 ids=batch, tweet_fields=["public_metrics"], user_auth=False
             )
             self._record("owned_read", len(batch))

@@ -53,26 +53,36 @@ class RealXEngager:
     """tweepy-backed engagement (OAuth 2.0 user token, scope tweet.write/follows).
 
     This class is the single home of the reply-to-others and follow endpoints.
+    Accepts a static token or a provider callable; the tweepy client is rebuilt when
+    a refreshed token arrives so approved engagements survive token expiry.
     """
 
-    def __init__(self, oauth2_user_access_token: str) -> None:
+    def __init__(self, token_source) -> None:
+        self._provider = token_source if callable(token_source) else (lambda: token_source)
+        self._token: str | None = None
+        self._client = None
+
+    def _c(self):
         import tweepy  # lazy
 
-        self._client = tweepy.Client(
-            bearer_token=oauth2_user_access_token, wait_on_rate_limit=True
-        )
+        tok = self._provider()
+        if tok != self._token or self._client is None:
+            self._token = tok
+            self._client = tweepy.Client(bearer_token=tok, wait_on_rate_limit=True)
+        return self._client
 
     def reply_to(self, text: str, target_tweet_id: str) -> str:
-        resp = self._client.create_tweet(
+        resp = self._c().create_tweet(
             text=text, in_reply_to_tweet_id=target_tweet_id, user_auth=False
         )
         return str(resp.data["id"])
 
     def follow(self, handle: str) -> bool:
-        user = self._client.get_user(username=handle, user_auth=False)
+        client = self._c()
+        user = client.get_user(username=handle, user_auth=False)
         if not user.data:
             return False
-        resp = self._client.follow_user(target_user_id=user.data.id, user_auth=False)
+        resp = client.follow_user(target_user_id=user.data.id, user_auth=False)
         return bool(getattr(resp, "data", {}) and resp.data.get("following"))
 
 

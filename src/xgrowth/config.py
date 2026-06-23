@@ -57,6 +57,13 @@ class Config:
     live_reply_interval_minutes: int = 10
     live_reply_max_age_minutes: int = 15
     live_reply_min_followers: int = 0
+    # AI-news content source (auto-posted, shares posts_per_day).
+    ai_news_enabled: bool = False
+    ai_news_interval_hours: int = 6
+    ai_news_max_per_day: int = 1
+    news_min_points: int = 50
+    news_item_max_age_hours: int = 24
+    ai_news_style: str = "mix"  # mix | opinion | tie_in
     models: Models = field(default_factory=Models)
 
     # ---- validation helpers -------------------------------------------------
@@ -70,6 +77,10 @@ class Config:
             raise ValueError("daily_reply_queue_size must be in 1..15")
         if self.min_post_spacing_minutes < 30:
             raise ValueError("min_post_spacing_minutes must be >= 30")
+        if not (0 <= self.ai_news_max_per_day <= self.posts_per_day):
+            raise ValueError("ai_news_max_per_day must be in 0..posts_per_day")
+        if self.ai_news_style not in ("mix", "opinion", "tie_in"):
+            raise ValueError("ai_news_style must be one of: mix, opinion, tie_in")
 
 
 @dataclass(frozen=True)
@@ -132,6 +143,12 @@ def config_from_dict(raw: dict) -> Config:
         live_reply_interval_minutes=int(raw.get("live_reply_interval_minutes", 10)),
         live_reply_max_age_minutes=int(raw.get("live_reply_max_age_minutes", 15)),
         live_reply_min_followers=int(raw.get("live_reply_min_followers", 0)),
+        ai_news_enabled=bool(raw.get("ai_news_enabled", False)),
+        ai_news_interval_hours=int(raw.get("ai_news_interval_hours", 6)),
+        ai_news_max_per_day=int(raw.get("ai_news_max_per_day", 1)),
+        news_min_points=int(raw.get("news_min_points", 50)),
+        news_item_max_age_hours=int(raw.get("news_item_max_age_hours", 24)),
+        ai_news_style=str(raw.get("ai_news_style", "mix")),
         models=models,
     )
 

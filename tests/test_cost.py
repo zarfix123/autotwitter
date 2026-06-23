@@ -25,6 +25,16 @@ def test_record_x_uses_price_table(conn):
     assert cost.record_x(conn, "post_create_with_url") == 0.20
 
 
+def test_record_search_counts_toward_weekly_spend(conn):
+    c = cost.record_search(conn, "claude-sonnet-4-6", count=2)
+    assert c == cost.SEARCH_PRICE_PER_USE * 2
+    assert cost.weekly_spend(conn) >= c
+    row = conn.execute(
+        "SELECT op FROM api_usage WHERE op LIKE 'web_search:%'"
+    ).fetchone()
+    assert row is not None
+
+
 def test_weekly_spend_and_cap(conn):
     cost.record_x(conn, "post_create_with_url")  # 0.20
     assert cost.weekly_spend(conn) >= 0.20

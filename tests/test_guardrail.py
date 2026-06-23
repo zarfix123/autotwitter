@@ -48,3 +48,25 @@ def test_read_surface_has_no_engagement_endpoints():
     text = (SRC / "x_read.py").read_text()
     assert "follow_user" not in text
     assert "create_tweet" not in text
+
+
+def test_web_search_tool_only_in_llm_module():
+    # The web_search tool declaration lives only in the LLM client.
+    assert files_containing("web_search_20260209") == {"llm.py"}
+
+
+def test_web_search_call_only_from_news_drafter():
+    # complete_with_search is defined in llm.py and called only by the AI-news drafter.
+    assert files_containing("complete_with_search") == {"llm.py", "news_content_gen.py"}
+
+
+def test_ai_news_path_has_no_engagement():
+    # AI-news posts are original posts (XPoster); they must never touch engagement.
+    for name in ("news_source.py", "news_watcher.py", "news_content_gen.py"):
+        text = (SRC / name).read_text()
+        assert "follow_user" not in text
+        assert "engagement_gate" not in text
+        assert "mint_approval_token" not in text
+    engagement = (SRC / "engagement.py").read_text()
+    assert "web_search" not in engagement
+    assert "complete_with_search" not in engagement

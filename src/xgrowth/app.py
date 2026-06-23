@@ -27,13 +27,26 @@ from datetime import datetime
 
 from dotenv import load_dotenv
 
-from . import analytics, db, live_reply, monitor, pipeline, reply_drafter
+from . import (
+    analytics,
+    db,
+    live_reply,
+    monitor,
+    news_content_gen,
+    news_watcher,
+    pipeline,
+    reply_drafter,
+    x_auth,
+)
 from . import poster as poster_mod
+from . import scheduler as scheduler_mod
 from .config import Config, Secrets, load_config, load_secrets
 from .engagement import DryRunXEngager, RealXEngager, XEngager
 from .git_watcher import Classifier, heuristic_classifier, make_llm_classifier
 from .github_client import GitHubCommitSource
 from .llm import AnthropicClient
+from .news_source import HackerNewsSource
+from .news_watcher import make_news_classifier, news_heuristic_classifier
 from .scheduler import parse_windows
 from .x_client import DryRunXPoster, RealXPoster, XPoster
 from .x_read import FakeXReader, RealXReader, XReader
@@ -57,13 +70,27 @@ def build_runtime(secrets: Secrets, config: Config, conn_factory):
 
     live_x = bool(secrets.x_access_token) and not secrets.dry_run
 
-    poster: XPoster = RealXPoster(secrets.x_access_token) if live_x else DryRunXPoster()
-    reader: XReader = (
-        RealXReader(secrets.x_access_token, conn=conn_factory()) if live_x else FakeXReader()
-    )
-    engager: XEngager = RealXEngager(secrets.x_access_token) if live_x else DryRunXEngager()
-
-    if not live_x:
+    if live_x:
+        # One provider keeps a valid OAuth2 user token across all three surfaces,
+        # refreshing + persisting it (DB) as the ~2h access token expires.
+        provider = x_auth.XTokenProvider(
+            client_id=secrets.x_client_id,
+            client_secret=secrets.x_client_secret,
+            conn_factory=conn_factory,
+            seed=x_auth.build_seed(secrets.x_access_token, secrets.x_refresh_token),
+        )
+        poster: XPoster = RealXPoster(provider.token)
+        reader: XReader = RealXReader(provider.token, conn=conn_factory())
+        engager: XEngager = RealXEngager(provider.token)
+        if not secrets.x_refresh_token:
+            logger.warning(
+                "X: no refresh token (X_REFRESH_TOKEN). The access token will expire in "
+                "~2h and posting will stop. Run scripts/x_oauth.py to mint a refreshable token."
+            )
+    else:
+        poster = DryRunXPoster()
+        reader = FakeXReader()
+        engager = DryRunXEngager()
         logger.info("X surfaces in DRY-RUN: no live reads/posts/engagement.")
     return source, classifier, llm, poster, reader, engager
 
@@ -136,6 +163,12 @@ async def main_async() -> None:
         secrets, config, conn_factory
     )
 
+    # AI-news source + classifier (Algolia HN needs no secret; classify uses Haiku).
+    news_source = HackerNewsSource()
+    news_classifier: Classifier = (
+        make_news_classifier(llm, config.models.classify) if llm else news_heuristic_classifier
+    )
+
     # ---- blocking job bodies (run via to_thread) ----
     def _watch_cycle() -> None:
         c = conn_factory()
@@ -170,6 +203,20 @@ async def main_async() -> None:
         finally:
             c.close()
 
+    def _ai_news_tick() -> None:
+        c = conn_factory()
+        try:
+            ins = analytics.insights(c)  # same soft feedback as commit posts
+            news_watcher.scan(c, config, news_source, news_classifier, now=_now())
+            news_content_gen.generate_news_drafts(
+                c, config, llm, now=_now(), hints=ins.hint_text or None
+            )
+            scheduler_mod.schedule_pending(
+                c, config, now=_now(), preferred_hours=ins.best_hours or None
+            )
+        finally:
+            c.close()
+
     async def watch_cycle() -> None:
         await asyncio.to_thread(_watch_cycle)
 
@@ -181,6 +228,9 @@ async def main_async() -> None:
 
     async def analytics_pull() -> None:
         await asyncio.to_thread(_analytics_pull)
+
+    async def ai_news_tick() -> None:
+        await asyncio.to_thread(_ai_news_tick)
 
     # ---- Telegram bot (optional; only if configured) ----
     application = None
@@ -240,6 +290,10 @@ async def main_async() -> None:
     sched.add_job(
         analytics_pull, "interval", hours=config.analytics_pull_interval_hours, id="analytics_pull"
     )
+    if config.ai_news_enabled:
+        sched.add_job(
+            ai_news_tick, "interval", hours=config.ai_news_interval_hours, id="ai_news_tick"
+        )
     if reply_reminder is not None:
         windows = parse_windows([config.reply_reminder_window])
         start = windows[0].start if windows else datetime.now().time().replace(hour=12, minute=0)

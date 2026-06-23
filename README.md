@@ -4,10 +4,11 @@ A compliance-first personal X (Twitter) growth tool for building in public. It
 **fully automates original posting** (the only thing X's 2026 rules allow to be
 automated) and keeps a **real human in the loop** for every engagement action.
 
-> **Status:** Phases 1–3 implemented and tested (101 tests): zero-touch posting,
-> the growth engine + Telegram approval + engagement gate, and the analytics
-> feedback loop + live-reply notifier. Phase 4 (hardening) is planned — see
-> `Roadmap` below.
+> **Status:** Phases 1–3 implemented and tested (128 tests): zero-touch posting,
+> the growth engine + Telegram approval + engagement gate, the analytics feedback
+> loop + live-reply notifier, and an optional AI-news content source (Hacker News
+> discovery + Claude web-search grounding) that auto-posts opinions/tie-ins inside
+> your daily cap. Phase 4 (deploy slice) is done — see `Roadmap` below.
 
 ## The one rule that shapes everything
 
@@ -82,6 +83,24 @@ live_reply_tick → a target just posted (fresh)? → draft a reply now
   pushes a single one-tap approval, so a timely reply can land while the post is still
   climbing. It only reads and drafts — sending still goes through the same gate.
 
+## The AI-news content source (optional, off by default)
+
+```
+news_watcher.scan (Hacker News) → classify(Haiku) → news_items (deduped)
+   → news_content_gen (Sonnet + web search) → opinion / work tie-in draft
+   → same Scheduler + Poster (auto-posted, inside posts_per_day)
+```
+
+So posts ride current AI conversations, not just your commits. The watcher pulls
+trending AI stories from Hacker News (free Algolia API, no key), keeps the fresh,
+high-signal, on-topic ones, and the drafter asks Claude — *with the web search
+tool* — to ground a post in what's actually happening and write either a sharp
+opinion or a tie-in to your recent work (a deterministic `mix`). These are
+**original posts**: they auto-post exactly like commit posts, share your daily cap
+(with a `ai_news_max_per_day` sub-cap), feed the same analytics loop, and never
+touch the engagement gate — that stays solely for follows/replies. Enable with
+`ai_news_enabled: true`; the web-search call is cost-capped like every other read.
+
 ## Setup
 
 Requires Python 3.11+.
@@ -135,8 +154,17 @@ Admin endpoints (default `http://127.0.0.1:8080`):
 ### Going live
 
 1. Run with `XGROWTH_DRY_RUN=1` first and watch `/status` + the audit log fill in.
-2. Provide X OAuth 2.0 **user-context** tokens (scope `tweet.write`) in `.env`.
-   Never use password login or browser automation (both are bannable).
+2. Mint X OAuth 2.0 **user-context** tokens (scopes `tweet.write` + `offline.access`):
+
+   ```bash
+   python scripts/x_oauth.py --redirect-uri "https://127.0.0.1/callback"
+   ```
+
+   Paste the printed `X_ACCESS_TOKEN` / `X_REFRESH_TOKEN` (and `X_CLIENT_ID` /
+   `X_CLIENT_SECRET`) into `.env`. Never use password login or browser automation
+   (both are bannable). The access token expires every ~2h; with a refresh token
+   present, the runtime auto-refreshes and persists it (`x_auth.py`), so the bot
+   keeps posting unattended. Without `offline.access` you'd have to re-mint by hand.
 3. Set `XGROWTH_DRY_RUN=0` to post for real.
 
 ### Deploy (any cheap always-on instance, e.g. AWS Lightsail/EC2)
@@ -147,7 +175,7 @@ systemd — both are covered, with a first-run dry-run smoke test, in **[DEPLOY.
 ## Develop
 
 ```bash
-PYTHONPATH=src python -m pytest -q     # 101 tests, no network/keys needed
+PYTHONPATH=src python -m pytest -q     # 128 tests, no network/keys needed
 python -m ruff check .                  # lint
 ```
 
@@ -168,5 +196,7 @@ the decision logic is tested without it.
 - **Phase 4 (deploy slice) — done:** Dockerfile, docker-compose, systemd unit, and the
   [DEPLOY.md](DEPLOY.md) runbook. Further hardening (cost dashboard, structured logging,
   expanded guardrail assertions) deferred until needed.
+- **AI-news content source — done:** Hacker News discovery + Claude web-search-grounded
+  opinion/tie-in drafting, auto-posted inside the daily cap (`ai_news_*` config).
 
 See `/root/.claude/plans/x-growth-engine-structured-waffle.md` for the full plan.
