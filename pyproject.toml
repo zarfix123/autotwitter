@@ -2,7 +2,7 @@
 name = "xgrowth"
 version = "0.1.0"
 description = "Compliance-first personal X (Twitter) growth engine"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dynamic = ["dependencies"]
 
 [tool.setuptools.packages.find]

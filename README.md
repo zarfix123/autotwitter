@@ -103,7 +103,7 @@ touch the engagement gate — that stays solely for follows/replies. Enable with
 
 ## Setup
 
-Requires Python 3.11+.
+Requires Python 3.10+.
 
 ```bash
 pip install -r requirements.txt          # runtime
