@@ -18,6 +18,8 @@ import yaml
 class Repo:
     owner: str
     name: str
+    private: bool = False
+    homepage: str | None = None  # public project URL (GitHub "Website" field), if set
 
     @property
     def full_name(self) -> str:

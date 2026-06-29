@@ -116,6 +116,42 @@ def test_select_and_draft_excludes_stale_window(conn, config, fake_llm):
     assert ids == []
 
 
+def test_truncated_model_output_does_not_leak_json_wrapper(conn, config):
+    class TruncLLM:  # simulates a too-long post cut off mid-JSON
+        def complete(self, *, model, system, user, max_tokens=1024):
+            return '{"body": "shipped Canvas LMS support today and then the post got cut'
+
+    event_id = _make_event(conn)
+    draft_id = content_gen.generate_draft(conn, event_id, config, TruncLLM())
+    body = conn.execute("SELECT body FROM drafts WHERE id = ?", (draft_id,)).fetchone()["body"]
+    assert body.startswith("shipped Canvas LMS support")
+    assert "{" not in body and "body" not in body  # no {"body": wrapper in the tweet
+
+
+def _ev_with_link(conn, link, key):
+    conn.execute(
+        "INSERT INTO git_events(repo, commit_shas, summary, dedup_key, is_meaningful, "
+        "topic, consumed, link, created_at) VALUES('Hadeva-Dev/Tolus','[\"a\"]','- shipped X',?,1,'AI',0,?,'t')",
+        (key, link),
+    )
+    conn.commit()
+    return conn.execute("SELECT id FROM git_events ORDER BY id DESC LIMIT 1").fetchone()["id"]
+
+
+def test_private_repo_event_drafts_with_no_link(conn, config, fake_llm):
+    eid = _ev_with_link(conn, "", "kpriv")  # "" = private repo, no public URL
+    draft_id = content_gen.generate_draft(conn, eid, config, fake_llm)
+    link = conn.execute("SELECT first_reply_link FROM drafts WHERE id = ?", (draft_id,)).fetchone()["first_reply_link"]
+    assert not link  # None/empty -> poster posts no self-reply
+
+
+def test_event_links_to_homepage_when_set(conn, config, fake_llm):
+    eid = _ev_with_link(conn, "https://tolus.dev", "khome")
+    draft_id = content_gen.generate_draft(conn, eid, config, fake_llm)
+    link = conn.execute("SELECT first_reply_link FROM drafts WHERE id = ?", (draft_id,)).fetchone()["first_reply_link"]
+    assert link == "https://tolus.dev"
+
+
 def test_select_and_draft_skips_near_duplicate(conn, config):
     from datetime import UTC, datetime
 

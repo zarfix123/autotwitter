@@ -13,7 +13,6 @@ exactly as in content_gen.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 from datetime import datetime
 
@@ -21,7 +20,7 @@ from . import audit, cost, db, dedupe
 from .config import Config
 from .content_gen import BodyContainsURLError, contains_url, strip_urls
 from .llm import LLMClient
-from .textfmt import max_len
+from .textfmt import extract_json_field, max_len
 
 __all__ = ["generate_news_drafts"]
 
@@ -69,6 +68,7 @@ def _system_prompt(
             f"{samples}"
         )
     perf = f"\nPerformance signal (use lightly, don't force): {hints}\n" if hints else ""
+    limit = max_len(config.x_premium)
     avoid = ""
     if recent:
         avoid = (
@@ -94,6 +94,8 @@ def _system_prompt(
         "writing so the take is grounded in what's actually happening.\n"
         f"{angle}\n"
         "Rules:\n"
+        f"- The ENTIRE post MUST be under {limit} characters and read as COMPLETE — a "
+        "finished thought, never cut off mid-sentence. Write short.\n"
         "- NEVER include a link or URL in the body. A link is added separately as a reply.\n"
         "- No hashtag spam, no 'excited to announce', no emojis unless natural.\n"
         '- Respond ONLY with compact JSON: {"body": str}.'
@@ -109,11 +111,7 @@ def _user_prompt(title: str, points: int, recent: list[str] | None) -> str:
 
 
 def _body_from_text(text: str) -> str:
-    try:
-        data = json.loads(text[text.index("{") : text.rindex("}") + 1])
-        return str(data.get("body", "")).strip()
-    except (ValueError, json.JSONDecodeError):
-        return strip_urls(text).strip()
+    return extract_json_field(text, "body")
 
 
 def generate_news_drafts(

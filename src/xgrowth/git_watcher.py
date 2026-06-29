@@ -37,6 +37,17 @@ def dedup_key(repo_full_name: str, shas: list[str]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
+def _commit_link(repo: Repo) -> str:
+    """Public link for a commit post: the project homepage if set, else the GitHub URL
+    if the repo is public, else "" — a private repo with no public URL gets NO link
+    (the poster skips the self-reply rather than leaking a 404 to a private repo)."""
+    if repo.homepage:
+        return repo.homepage
+    if not repo.private:
+        return f"https://github.com/{repo.full_name}"
+    return ""
+
+
 def build_summary(commits: list[Commit]) -> str:
     """Build a scrubbed, human-readable summary from commit messages + file paths."""
     lines: list[str] = []
@@ -161,7 +172,7 @@ def poll_repo(
 
     cur = conn.execute(
         "INSERT INTO git_events(repo, commit_shas, summary, dedup_key, is_meaningful, "
-        "topic, consumed, created_at) VALUES(?,?,?,?,?,?,0,?)",
+        "topic, consumed, link, created_at) VALUES(?,?,?,?,?,?,0,?,?)",
         (
             repo.full_name,
             json.dumps(shas),
@@ -169,6 +180,7 @@ def poll_repo(
             key,
             1 if result.meaningful else 0,
             result.topic,
+            _commit_link(repo),
             now,
         ),
     )

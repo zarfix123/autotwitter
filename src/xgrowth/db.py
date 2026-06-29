@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS git_events (
     is_meaningful INTEGER NOT NULL DEFAULT 0,
     topic         TEXT,
     consumed      INTEGER NOT NULL DEFAULT 0,  -- 1 once a draft has been generated
+    link          TEXT,                        -- resolved public link ("" = private, no link)
     created_at    TEXT NOT NULL
 );
 
@@ -189,6 +190,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     opp_cols = {row["name"] for row in conn.execute("PRAGMA table_info(reply_opportunities)").fetchall()}
     if "topic" not in opp_cols:
         conn.execute("ALTER TABLE reply_opportunities ADD COLUMN topic TEXT")
+    ge_cols = {row["name"] for row in conn.execute("PRAGMA table_info(git_events)").fetchall()}
+    if "link" not in ge_cols:
+        conn.execute("ALTER TABLE git_events ADD COLUMN link TEXT")
 
 
 # ---- settings (paused flag / kill switch state, cursors) --------------------

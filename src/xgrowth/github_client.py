@@ -102,7 +102,12 @@ class GitHubCommitSource:
             for item in batch:
                 if since_pushed and (item.get("pushed_at") or "") < since_pushed:
                     return repos  # sorted newest-first -> everything after is older
-                repos.append(Repo(owner=item["owner"]["login"], name=item["name"]))
+                repos.append(Repo(
+                    owner=item["owner"]["login"],
+                    name=item["name"],
+                    private=bool(item.get("private")),
+                    homepage=(item.get("homepage") or "").strip() or None,
+                ))
             if len(batch) < 100:
                 break
             page += 1

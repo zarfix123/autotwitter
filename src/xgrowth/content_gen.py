@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from . import audit, dedupe
 from .config import Config
 from .llm import LLMClient
-from .textfmt import contains_url, strip_urls
+from .textfmt import contains_url, extract_json_field, strip_urls
 
 __all__ = [
     "contains_url",
@@ -66,6 +66,7 @@ def _system_prompt(
     # Stable across drafts -> cached. Voice + recent-posts steer tone and de-dup.
     clusters = ", ".join(config.topic_clusters)
     perf = f"\nPerformance signal (use lightly, don't force): {hints}\n" if hints else ""
+    limit = _max_len(config)
     return (
         "You write original 'building in public' posts for a solo founder on X.\n"
         f"Topics: {clusters}.\n"
@@ -73,6 +74,8 @@ def _system_prompt(
         f"{perf}{_avoid_block(recent)}\n"
         "Rules:\n"
         "- Write ONE post about what shipped and why it matters.\n"
+        f"- The ENTIRE post MUST be under {limit} characters and read as COMPLETE — a "
+        "finished thought, never cut off mid-sentence. Write short; do not run long.\n"
         "- NEVER include a link or URL in the body. A link is added separately as a reply.\n"
         "- No hashtags spam, no 'excited to announce', no emojis unless natural.\n"
         '- Respond ONLY with compact JSON: {"body": str}.'
@@ -105,7 +108,7 @@ def generate_draft(
     post (the event is marked consumed either way, so it isn't retried).
     """
     row = conn.execute(
-        "SELECT id, repo, summary, is_meaningful, consumed FROM git_events WHERE id = ?",
+        "SELECT id, repo, summary, is_meaningful, consumed, link FROM git_events WHERE id = ?",
         (event_id,),
     ).fetchone()
     if row is None:
@@ -124,11 +127,7 @@ def generate_draft(
             user=f"Change summary:\n{summary}",
             max_tokens=400,
         )
-        try:
-            data = json.loads(text[text.index("{") : text.rindex("}") + 1])
-            body = str(data.get("body", "")).strip()
-        except (ValueError, json.JSONDecodeError):
-            body = strip_urls(text).strip()
+        body = extract_json_field(text, "body")
     else:
         body = _fallback_body(summary, config)
 
@@ -152,7 +151,15 @@ def generate_draft(
         )
         return None
 
-    link = first_reply_link or repo_url(row["repo"])
+    # Link policy: prefer the link the watcher resolved for this repo — a public URL,
+    # or "" meaning "private repo with no public homepage -> post no link at all".
+    # Fall back to the GitHub URL only for legacy events that predate the link column.
+    if first_reply_link is not None:
+        link = first_reply_link
+    elif row["link"] is not None:
+        link = row["link"] or None
+    else:
+        link = repo_url(row["repo"])
 
     cur = conn.execute(
         "INSERT INTO drafts(git_event_id, kind, body, first_reply_link, status, model, "

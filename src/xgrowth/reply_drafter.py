@@ -8,13 +8,12 @@ after a human approves in Telegram.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 
 from . import audit
 from .config import Config
 from .llm import LLMClient
-from .textfmt import clamp, strip_urls
+from .textfmt import clamp, extract_json_field, max_len, strip_urls
 
 
 def _recent_sent_replies(conn: sqlite3.Connection, limit: int = 10) -> list[str]:
@@ -36,6 +35,7 @@ def _system_prompt(
         voice_block = f"Voice samples (match tone — direct, specific, no hype):\n{samples}"
     avoid = "\n".join(f"- {r}" for r in recent) if recent else "(none yet)"
     perf = f"What's been landing (lean into it, don't force): {hints}\n" if hints else ""
+    limit = max_len(config.x_premium)
     return (
         "You write replies to other people's posts on X, as a solo founder.\n"
         f"Topics you know: {clusters}.\n"
@@ -44,7 +44,7 @@ def _system_prompt(
         "Rules for the reply:\n"
         "- Be specific and substantive: add a concrete point, question, or experience.\n"
         "- Never generic ('great post!', 'so true', 'love this').\n"
-        "- No links/URLs, no hashtag spam, keep it to one or two sentences.\n"
+        f"- No links/URLs, no hashtag spam; one or two sentences, under {limit} characters, complete.\n"
         "- Vary phrasing; do NOT reuse openers or structure from these recent replies:\n"
         f"{avoid}\n\n"
         'Respond ONLY with compact JSON: {"reply": str}.'
@@ -81,11 +81,7 @@ def draft_one(
             user=f"Post by @{opp['author_handle']}:\n{opp['text']}",
             max_tokens=300,
         )
-        try:
-            data = json.loads(text[text.index("{") : text.rindex("}") + 1])
-            reply = str(data.get("reply", "")).strip()
-        except (ValueError, json.JSONDecodeError):
-            reply = strip_urls(text).strip()
+        reply = extract_json_field(text, "reply")
     else:
         reply = _fallback_reply(opp["text"])
 

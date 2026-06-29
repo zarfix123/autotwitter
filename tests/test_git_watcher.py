@@ -90,3 +90,17 @@ def test_explicit_repos_mode_does_not_enumerate(conn, config, sample_commits):
     source = FakeCommitSource(sample_commits, repos=[Repo("x", "y")])
     git_watcher.run(conn, config, source, always_meaningful)  # watch_all_repos False
     assert not any(c.get("list_repos") for c in source.calls)
+
+
+def test_commit_link_public_private_homepage(conn, config, sample_commits):
+    cfg = replace(config, watch_all_repos=True)
+    repos = [
+        Repo("zarfix123", "pub"),                                # public, no homepage -> github
+        Repo("Hadeva-Dev", "Tolus", private=True),               # private, no homepage -> "" (no link)
+        Repo("zarfix123", "site", homepage="https://tolus.dev"),  # homepage wins
+    ]
+    git_watcher.run(conn, cfg, FakeCommitSource(sample_commits, repos=repos), always_meaningful)
+    links = {r["repo"]: r["link"] for r in conn.execute("SELECT repo, link FROM git_events").fetchall()}
+    assert links["zarfix123/pub"] == "https://github.com/zarfix123/pub"
+    assert links["Hadeva-Dev/Tolus"] == ""           # private -> the poster adds no self-reply
+    assert links["zarfix123/site"] == "https://tolus.dev"
