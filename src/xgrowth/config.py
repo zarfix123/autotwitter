@@ -64,6 +64,13 @@ class Config:
     news_min_points: int = 50
     news_item_max_age_hours: int = 24
     ai_news_style: str = "mix"  # mix | opinion | tie_in
+    # Commit selection (windowed best-pick) + content mix.
+    commit_window_days: int = 7
+    commit_posts_per_day: int = 1
+    # Writing voice distilled from the blog (empty repo = use static voice_samples).
+    voice_blog_repo: str = ""          # "owner/name", e.g. zarfix123/zarfix123.github.io
+    voice_blog_path: str = "blog/posts"
+    voice_refresh_days: int = 7
     models: Models = field(default_factory=Models)
 
     # ---- validation helpers -------------------------------------------------
@@ -81,6 +88,10 @@ class Config:
             raise ValueError("ai_news_max_per_day must be in 0..posts_per_day")
         if self.ai_news_style not in ("mix", "opinion", "tie_in"):
             raise ValueError("ai_news_style must be one of: mix, opinion, tie_in")
+        if not (0 <= self.commit_posts_per_day <= self.posts_per_day):
+            raise ValueError("commit_posts_per_day must be in 0..posts_per_day")
+        if self.commit_window_days < 1:
+            raise ValueError("commit_window_days must be >= 1")
 
 
 @dataclass(frozen=True)
@@ -149,6 +160,11 @@ def config_from_dict(raw: dict) -> Config:
         news_min_points=int(raw.get("news_min_points", 50)),
         news_item_max_age_hours=int(raw.get("news_item_max_age_hours", 24)),
         ai_news_style=str(raw.get("ai_news_style", "mix")),
+        commit_window_days=int(raw.get("commit_window_days", 7)),
+        commit_posts_per_day=int(raw.get("commit_posts_per_day", 1)),
+        voice_blog_repo=str(raw.get("voice_blog_repo", "")),
+        voice_blog_path=str(raw.get("voice_blog_path", "blog/posts")),
+        voice_refresh_days=int(raw.get("voice_refresh_days", 7)),
         models=models,
     )
 

@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 from xgrowth import cost, db, monitor
+from xgrowth.analytics import ReplyInsights
 from xgrowth.x_read import FakeXReader, Tweet
 
 NOW = datetime(2026, 6, 22, 12, 0, tzinfo=UTC)
@@ -98,3 +99,30 @@ def test_low_relevance_no_follow_candidates(conn, config):
     object.__setattr__(config, "max_follows_per_day", 2)
     monitor.scan(conn, config, _reader(config), FakeRankLLM(relevance=0.2), now=NOW)
     assert conn.execute("SELECT COUNT(*) FROM follow_candidates").fetchone()[0] == 0
+
+
+def test_opportunities_store_topic(conn, config):
+    monitor.scan(conn, config, _reader(config), FakeRankLLM(), now=NOW)
+    topics = [r["topic"] for r in conn.execute("SELECT topic FROM reply_opportunities").fetchall()]
+    assert topics and all(t is not None for t in topics)  # default topic assigned
+
+
+def test_reply_insights_rerank_by_author(conn, config):
+    # Two equally-relevant, equally-fresh, equal-size posts; only the learned
+    # author factor differs -> the high-performing author should rank first.
+    object.__setattr__(config, "target_accounts", ["good", "bad"])
+    object.__setattr__(config, "keywords", [])
+    reader = FakeXReader(
+        timelines={
+            "good": [Tweet("g1", "good", "u", "a post", FRESH, author_followers=1000)],
+            "bad": [Tweet("b1", "bad", "u", "a post", FRESH, author_followers=1000)],
+        },
+        search_results={},
+    )
+    ri = ReplyInsights(author_factors={"good": 2.0, "bad": 0.5})
+    monitor.scan(conn, config, reader, FakeRankLLM(relevance=0.8), now=NOW, reply_insights=ri)
+    ranks = {
+        r["author_handle"]: r["rank"]
+        for r in conn.execute("SELECT author_handle, rank FROM reply_opportunities").fetchall()
+    }
+    assert ranks["good"] < ranks["bad"]

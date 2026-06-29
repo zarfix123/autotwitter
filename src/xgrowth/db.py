@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS drafts (
     reply_tweet_id   TEXT,
     model            TEXT,
     topic            TEXT,                           -- own topic for source-less (AI-news) drafts
+    category         TEXT,                           -- commit | opinion | tie_in (content mix)
     created_at       TEXT NOT NULL,
     FOREIGN KEY (git_event_id) REFERENCES git_events(id)
 );
@@ -88,6 +89,7 @@ CREATE TABLE IF NOT EXISTS reply_opportunities (
     freshness_min    REAL,
     relevance_score  REAL,
     rank             INTEGER,
+    topic            TEXT,                   -- matched topic cluster, for reply-performance attribution
     status           TEXT NOT NULL DEFAULT 'queued',
     created_at       TEXT NOT NULL
 );
@@ -128,6 +130,16 @@ CREATE TABLE IF NOT EXISTS analytics (
     reposts     INTEGER,
     replies     INTEGER,
     fetched_at  TEXT NOT NULL
+);
+
+-- Performance of OUR sent replies (owned reads), for the reply feedback loop.
+CREATE TABLE IF NOT EXISTS reply_analytics (
+    reply_tweet_id TEXT NOT NULL,    -- the id of the reply we posted
+    impressions    INTEGER,
+    likes          INTEGER,
+    reposts        INTEGER,
+    replies        INTEGER,
+    fetched_at     TEXT NOT NULL
 );
 
 -- AI-news content source: trending stories discovered for opinion/tie-in posts.
@@ -172,6 +184,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {row["name"] for row in conn.execute("PRAGMA table_info(drafts)").fetchall()}
     if "topic" not in cols:
         conn.execute("ALTER TABLE drafts ADD COLUMN topic TEXT")
+    if "category" not in cols:
+        conn.execute("ALTER TABLE drafts ADD COLUMN category TEXT")
+    opp_cols = {row["name"] for row in conn.execute("PRAGMA table_info(reply_opportunities)").fetchall()}
+    if "topic" not in opp_cols:
+        conn.execute("ALTER TABLE reply_opportunities ADD COLUMN topic TEXT")
 
 
 # ---- settings (paused flag / kill switch state, cursors) --------------------

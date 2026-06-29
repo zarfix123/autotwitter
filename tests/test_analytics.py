@@ -87,3 +87,69 @@ def test_insights_ranks_topics_and_hours(conn):
     assert ins.top_topics[0] == "AI"
     assert ins.best_hours[0] == 9
     assert "AI" in ins.hint_text and "09:00" in ins.hint_text
+
+
+# --- reply feedback loop ------------------------------------------------------
+def _scored_reply(conn, reply_tweet_id, author, topic, likes):
+    """Seed a sent reply with attribution + a metrics snapshot."""
+    conn.execute(
+        "INSERT INTO reply_opportunities(target_tweet_id, author_handle, topic, status, "
+        "created_at) VALUES(?,?,?,'sent','t')",
+        (f"opp-{reply_tweet_id}", author, topic),
+    )
+    opp = conn.execute("SELECT id FROM reply_opportunities ORDER BY id DESC LIMIT 1").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO reply_drafts(opportunity_id, text, status, sent_tweet_id, created_at) "
+        "VALUES(?, 'r', 'sent', ?, ?)",
+        (opp, reply_tweet_id, NOW.isoformat()),
+    )
+    conn.execute(
+        "INSERT INTO reply_analytics(reply_tweet_id, impressions, likes, reposts, replies, "
+        "fetched_at) VALUES(?, 1000, ?, 0, 0, ?)",
+        (reply_tweet_id, likes, NOW.isoformat()),
+    )
+    conn.commit()
+
+
+def test_pull_replies_writes_snapshots(conn, config):
+    conn.execute(
+        "INSERT INTO reply_opportunities(target_tweet_id, author_handle, status, created_at) "
+        "VALUES('o','x','sent','t')"
+    )
+    opp = conn.execute("SELECT id FROM reply_opportunities").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO reply_drafts(opportunity_id, text, status, sent_tweet_id, created_at) "
+        "VALUES(?, 'r', 'sent', 'rt1', ?)",
+        (opp, (NOW - timedelta(days=1)).isoformat()),
+    )
+    conn.commit()
+    reader = FakeXReader(metrics={"rt1": Metrics(impressions=200, likes=5)})
+    snapped = analytics.pull_replies(conn, config, reader, now=NOW)
+    assert snapped == ["rt1"]
+    assert conn.execute("SELECT COUNT(*) FROM reply_analytics").fetchone()[0] == 1
+
+
+def test_pull_replies_skips_when_paused(conn, config):
+    db.set_paused(conn, True)
+    assert analytics.pull_replies(conn, config, FakeXReader(), now=NOW) == []
+
+
+def test_reply_insights_empty_below_min(conn):
+    _scored_reply(conn, "r1", "good", "AI", 100)
+    _scored_reply(conn, "r2", "good", "AI", 100)
+    ri = analytics.reply_insights(conn, min_samples=3)
+    assert ri.author_factors == {} and ri.topic_factors == {} and ri.hint_text == ""
+
+
+def test_reply_insights_factors_and_hint(conn):
+    for i in range(3):
+        _scored_reply(conn, f"g{i}", "good", "AI", 100)    # high engagement
+    for i in range(3):
+        _scored_reply(conn, f"b{i}", "bad", "edtech", 1)   # low engagement
+    ri = analytics.reply_insights(conn, min_samples=3)
+    assert ri.author_factor("good") > 1.0 > ri.author_factor("bad")
+    assert ri.topic_factor("AI") > ri.topic_factor("edtech")
+    assert ri.top_authors[0] == "good"
+    assert ri.top_topics[0] == "AI"
+    assert "@good" in ri.hint_text and "AI" in ri.hint_text
+    assert ri.author_factor("nobody") == 1.0  # unknown -> neutral

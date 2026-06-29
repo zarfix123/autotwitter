@@ -80,3 +80,17 @@ def test_only_queued_opportunities_drafted(conn, config):
     conn.commit()
     drafts = reply_drafter.draft_pending(conn, config, FakeReplyLLM())
     assert drafts == []
+
+
+def test_performance_hint_reaches_prompt(conn, config):
+    _opp(conn, 0)
+    llm = FakeReplyLLM()
+    reply_drafter.draft_pending(conn, config, llm, hints="replies to @levelsio land best")
+    assert any("replies to @levelsio land best" in c["system"] for c in llm.calls)
+
+
+def test_no_hint_no_performance_line(conn, config):
+    _opp(conn, 0)
+    llm = FakeReplyLLM()
+    reply_drafter.draft_pending(conn, config, llm)
+    assert all("What's been landing" not in c["system"] for c in llm.calls)

@@ -17,7 +17,7 @@ import json
 import sqlite3
 from datetime import datetime
 
-from . import audit, cost, db
+from . import audit, cost, db, dedupe
 from .config import Config
 from .content_gen import BodyContainsURLError, contains_url, strip_urls
 from .llm import LLMClient
@@ -56,10 +56,25 @@ def _pick_style(config: Config, item_id: str, has_recent_work: bool) -> str:
     return style
 
 
-def _system_prompt(config: Config, style: str, hints: str | None) -> str:
-    samples = "\n".join(f"- {s}" for s in config.voice_samples)
+def _system_prompt(
+    config: Config, style: str, hints: str | None, voice: str = "", recent: list[str] | None = None
+) -> str:
     clusters = ", ".join(config.topic_clusters)
+    if voice:
+        voice_block = voice
+    else:
+        samples = "\n".join(f"- {s}" for s in config.voice_samples)
+        voice_block = (
+            "Voice samples (match this tone — direct, specific, lowercase-ok, no hype):\n"
+            f"{samples}"
+        )
     perf = f"\nPerformance signal (use lightly, don't force): {hints}\n" if hints else ""
+    avoid = ""
+    if recent:
+        avoid = (
+            "\nAlready posted recently — do NOT repeat these angles/openers; take a "
+            "clearly different angle:\n" + "\n".join(f"- {r}" for r in recent[:8]) + "\n"
+        )
     if style == "tie_in":
         angle = (
             "Write ONE post that relates the founder's own recent work to this trending "
@@ -73,9 +88,8 @@ def _system_prompt(config: Config, style: str, hints: str | None) -> str:
     return (
         "You write original posts for a solo founder building in public in AI.\n"
         f"Topics: {clusters}.\n"
-        "Voice samples (match this tone — direct, specific, lowercase-ok, no hype):\n"
-        f"{samples}\n"
-        f"{perf}\n"
+        f"{voice_block}\n"
+        f"{perf}{avoid}\n"
         "You have the web search tool — search for current context on the story before "
         "writing so the take is grounded in what's actually happening.\n"
         f"{angle}\n"
@@ -109,8 +123,14 @@ def generate_news_drafts(
     *,
     now: datetime,
     hints: str | None = None,
+    voice: str = "",
+    limit: int | None = None,
 ) -> list[int]:
-    """Draft posts for the top unconsumed news items, up to the daily sub-cap."""
+    """Draft posts for the top unconsumed news items.
+
+    ``limit`` (from the content planner) sets how many to create this call; without
+    it, the daily sub-cap (``ai_news_max_per_day``) applies.
+    """
     if not config.ai_news_enabled:
         return []
     if db.is_paused(conn):
@@ -121,7 +141,7 @@ def generate_news_drafts(
         audit.log(conn, "news_draft.skipped", detail={"reason": "weekly_cost_cap"})
         return []
 
-    remaining = config.ai_news_max_per_day - _news_drafted_today(conn, now)
+    remaining = limit if limit is not None else config.ai_news_max_per_day - _news_drafted_today(conn, now)
     if remaining <= 0:
         return []
 
@@ -130,17 +150,20 @@ def generate_news_drafts(
         "ORDER BY points DESC, item_created_at DESC"
     ).fetchall()
 
-    limit = max_len(config.x_premium)
-    recent = _recent_work(conn)
+    max_body = max_len(config.x_premium)
+    recent_work = _recent_work(conn)
     created: list[int] = []
-    for item in rows[:remaining]:
-        style = _pick_style(config, item["item_id"], bool(recent))
+    for item in rows:
+        if len(created) >= remaining:
+            break
+        style = _pick_style(config, item["item_id"], bool(recent_work))
+        recent_posts = dedupe.recent_post_texts(conn)
         if llm is not None:
             text, _citations = llm.complete_with_search(
                 model=config.models.draft,
-                system=_system_prompt(config, style, hints),
+                system=_system_prompt(config, style, hints, voice, recent_posts),
                 user=_user_prompt(
-                    item["title"], item["points"], recent if style == "tie_in" else None
+                    item["title"], item["points"], recent_work if style == "tie_in" else None
                 ),
                 max_tokens=600,
             )
@@ -152,13 +175,24 @@ def generate_news_drafts(
             body = strip_urls(body)
             if contains_url(body):
                 raise BodyContainsURLError("generated news body still contains a URL after stripping")
-        if len(body) > limit:
-            body = body[:limit].rstrip()
+        if len(body) > max_body:
+            body = body[:max_body].rstrip()
+
+        # De-dup guard: skip a near-copy of something already queued/posted.
+        if dedupe.too_similar(body, recent_posts):
+            conn.execute("UPDATE news_items SET consumed = 1 WHERE id = ?", (item["id"],))
+            conn.commit()
+            audit.log(
+                conn, "news_draft.skipped_duplicate", entity_type="news_item",
+                entity_id=item["id"], detail={"reason": "too_similar"},
+            )
+            continue
 
         cur = conn.execute(
             "INSERT INTO drafts(git_event_id, kind, body, first_reply_link, status, model, "
-            "topic, created_at) VALUES(NULL,?,?,?,?,?,?,?)",
-            ("post", body, item["url"], "draft", config.models.draft, item["topic"], now.isoformat()),
+            "topic, category, created_at) VALUES(NULL,?,?,?,?,?,?,?,?)",
+            ("post", body, item["url"], "draft", config.models.draft, item["topic"], style,
+             now.isoformat()),
         )
         conn.execute("UPDATE news_items SET consumed = 1 WHERE id = ?", (item["id"],))
         conn.commit()
@@ -169,6 +203,7 @@ def generate_news_drafts(
             "draft.created",
             entity_type="draft",
             entity_id=draft_id,
-            detail={"source": "news", "news_item_id": item["id"], "style": style, "len": len(body)},
+            detail={"source": "news", "news_item_id": item["id"], "category": style,
+                    "len": len(body)},
         )
     return created

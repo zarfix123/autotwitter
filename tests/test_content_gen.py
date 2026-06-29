@@ -84,3 +84,48 @@ def test_generate_pending_only_meaningful_unconsumed(conn, config, fake_llm):
     conn.commit()
     drafts = content_gen.generate_pending(conn, config, fake_llm)
     assert len(drafts) == 1
+
+
+# --- windowed selector + de-dup -----------------------------------------------
+def _ev(conn, summary, key, created="2026-06-22T10:00:00Z"):
+    conn.execute(
+        "INSERT INTO git_events(repo, commit_shas, summary, dedup_key, is_meaningful, "
+        "topic, consumed, created_at) VALUES('r','[]',?,?,1,'AI',0,?)",
+        (summary, key, created),
+    )
+    conn.commit()
+
+
+def test_select_and_draft_picks_only_max_posts(conn, config, fake_llm):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 6, 24, 12, 0, tzinfo=UTC)
+    _ev(conn, "- shipped feature A", "ka")
+    _ev(conn, "- shipped feature B", "kb")
+    ids = content_gen.select_and_draft(conn, config, fake_llm, now=now, max_posts=1)
+    assert len(ids) == 1  # best one only, not every commit
+    assert conn.execute("SELECT COUNT(*) FROM git_events WHERE consumed=1").fetchone()[0] == 1
+
+
+def test_select_and_draft_excludes_stale_window(conn, config, fake_llm):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 6, 24, 12, 0, tzinfo=UTC)
+    _ev(conn, "- old work", "kold", created="2026-06-01T10:00:00Z")  # > 7 days old
+    ids = content_gen.select_and_draft(conn, config, fake_llm, now=now, max_posts=1)
+    assert ids == []
+
+
+def test_select_and_draft_skips_near_duplicate(conn, config):
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 6, 24, 12, 0, tzinfo=UTC)
+    conn.execute(
+        "INSERT INTO drafts(kind, body, status, created_at) "
+        "VALUES('post','shipped a clean feature today','posted','t')"
+    )
+    conn.commit()
+    _ev(conn, "- shipped feature A", "ka")
+    llm = FakeLLM(body="shipped a clean feature today")  # identical to the existing post
+    ids = content_gen.select_and_draft(conn, config, llm, now=now, max_posts=1)
+    assert ids == []  # near-duplicate -> skipped, not queued

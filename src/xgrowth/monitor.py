@@ -14,6 +14,7 @@ import sqlite3
 from datetime import UTC, datetime
 
 from . import audit, cost, db
+from .analytics import ReplyInsights
 from .config import Config
 from .llm import LLMClient
 from .x_read import Tweet, XReader
@@ -45,34 +46,38 @@ def _size_factor(followers: int | None) -> float:
 
 def rank_relevance(
     llm: LLMClient | None, model: str, clusters: list[str], candidates: list[Tweet]
-) -> dict[str, float]:
-    """Return {tweet_id: relevance 0..1}. One batched call; 0.5 fallback."""
+) -> dict[str, tuple[float, str]]:
+    """Return {tweet_id: (relevance 0..1, topic)}. One batched call; neutral fallback."""
+    default_topic = clusters[0] if clusters else "general"
     if not candidates:
         return {}
     if llm is None:
-        return {t.id: 0.5 for t in candidates}
+        return {t.id: (0.5, default_topic) for t in candidates}
     numbered = "\n".join(f"{i}. {t.text}" for i, t in enumerate(candidates))
     system = (
         "You rate how relevant each post is for a founder to reply to, given their "
-        "topic clusters. Relevant = on-topic, invites a substantive reply, worth being "
-        "an early reply on. Respond ONLY with a compact JSON array of "
-        '{"i": int, "relevance": number 0..1}, one per post.'
+        "topic clusters, and tag which cluster it belongs to. Relevant = on-topic, "
+        "invites a substantive reply, worth being an early reply on. Respond ONLY with a "
+        'compact JSON array of {"i": int, "relevance": number 0..1, "topic": str}, one '
+        "per post. topic must be one of the clusters or 'general'."
     )
     user = f"Topic clusters: {clusters}\n\nPosts:\n{numbered}"
-    text = llm.complete(model=model, system=system, user=user, max_tokens=600)
+    text = llm.complete(model=model, system=system, user=user, max_tokens=700)
     try:
         data = json.loads(text[text.index("[") : text.rindex("]") + 1])
-        scores: dict[str, float] = {}
+        scores: dict[str, tuple[float, str]] = {}
         for entry in data:
             idx = int(entry["i"])
             if 0 <= idx < len(candidates):
-                scores[candidates[idx].id] = max(0.0, min(1.0, float(entry["relevance"])))
+                rel = max(0.0, min(1.0, float(entry["relevance"])))
+                topic = str(entry.get("topic") or default_topic)
+                scores[candidates[idx].id] = (rel, topic)
         # Anything the model skipped gets a neutral default.
         for t in candidates:
-            scores.setdefault(t.id, 0.5)
+            scores.setdefault(t.id, (0.5, default_topic))
         return scores
     except (ValueError, KeyError, json.JSONDecodeError, TypeError):
-        return {t.id: 0.5 for t in candidates}
+        return {t.id: (0.5, default_topic) for t in candidates}
 
 
 def _gather(config: Config, reader: XReader) -> list[Tweet]:
@@ -95,9 +100,15 @@ def scan(
     llm: LLMClient | None = None,
     *,
     now: datetime | None = None,
+    reply_insights: ReplyInsights | None = None,
 ) -> list[int]:
-    """Run one monitor scan. Returns created reply_opportunity ids. No engagement."""
+    """Run one monitor scan. Returns created reply_opportunity ids. No engagement.
+
+    ``reply_insights`` (learned from past replies) re-ranks opportunities by how well
+    we've historically performed replying to that author / on that topic. None = neutral.
+    """
     now = now or datetime.now(UTC)
+    ri = reply_insights or ReplyInsights()
 
     if db.is_paused(conn):
         audit.log(conn, "monitor.skipped", detail={"reason": "paused"})
@@ -136,25 +147,33 @@ def scan(
                 t.author_followers = counts.get(t.author_handle)
 
     fresh_tweets = [t for t, _ in fresh]
-    relevance = rank_relevance(llm, config.models.classify, config.topic_clusters, fresh_tweets)
+    ranked = rank_relevance(llm, config.models.classify, config.topic_clusters, fresh_tweets)
+    default_topic = config.topic_clusters[0] if config.topic_clusters else "general"
 
     scored = []
     for t, age in fresh:
-        rel = relevance.get(t.id, 0.5)
-        score = rel * _freshness_factor(age, config.opportunity_max_age_minutes) * _size_factor(t.author_followers)
-        scored.append((score, rel, age, t))
+        rel, topic = ranked.get(t.id, (0.5, default_topic))
+        # Base score x learned author/topic performance (the dynamic re-ranking).
+        score = (
+            rel
+            * _freshness_factor(age, config.opportunity_max_age_minutes)
+            * _size_factor(t.author_followers)
+            * ri.author_factor(t.author_handle)
+            * ri.topic_factor(topic)
+        )
+        scored.append((score, rel, age, topic, t))
     scored.sort(key=lambda x: x[0], reverse=True)
 
     cap = max(config.daily_reply_queue_size * 3, 15)
     created: list[int] = []
-    for rank, (_score, rel, age, t) in enumerate(scored[:cap]):
+    for rank, (_score, rel, age, topic, t) in enumerate(scored[:cap]):
         cur = conn.execute(
             "INSERT INTO reply_opportunities(target_tweet_id, author_handle, "
             "author_followers, text, posted_at, freshness_min, relevance_score, rank, "
-            "status, created_at) VALUES(?,?,?,?,?,?,?,?,'queued',?)",
+            "topic, status, created_at) VALUES(?,?,?,?,?,?,?,?,?,'queued',?)",
             (
                 t.id, t.author_handle, t.author_followers, t.text, t.created_at,
-                age, rel, rank, now.isoformat(),
+                age, rel, rank, topic, now.isoformat(),
             ),
         )
         created.append(int(cur.lastrowid))
@@ -174,7 +193,7 @@ def _derive_follow_candidates(
         return
     existing = {r["handle"] for r in conn.execute("SELECT handle FROM follow_candidates").fetchall()}
     added = 0
-    for _score, rel, _age, t in scored:
+    for _score, rel, _age, _topic, t in scored:
         if added >= config.max_follows_per_day:
             break
         if rel < 0.6 or not t.author_handle or t.author_handle in existing:

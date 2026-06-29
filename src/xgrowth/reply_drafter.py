@@ -25,14 +25,22 @@ def _recent_sent_replies(conn: sqlite3.Connection, limit: int = 10) -> list[str]
     return [r["text"] for r in rows]
 
 
-def _system_prompt(config: Config, recent: list[str]) -> str:
-    samples = "\n".join(f"- {s}" for s in config.voice_samples)
+def _system_prompt(
+    config: Config, recent: list[str], hints: str | None = None, voice: str = ""
+) -> str:
     clusters = ", ".join(config.topic_clusters)
+    if voice:
+        voice_block = voice
+    else:
+        samples = "\n".join(f"- {s}" for s in config.voice_samples)
+        voice_block = f"Voice samples (match tone — direct, specific, no hype):\n{samples}"
     avoid = "\n".join(f"- {r}" for r in recent) if recent else "(none yet)"
+    perf = f"What's been landing (lean into it, don't force): {hints}\n" if hints else ""
     return (
         "You write replies to other people's posts on X, as a solo founder.\n"
         f"Topics you know: {clusters}.\n"
-        f"Voice samples (match tone — direct, specific, no hype):\n{samples}\n\n"
+        f"{voice_block}\n"
+        f"{perf}\n"
         "Rules for the reply:\n"
         "- Be specific and substantive: add a concrete point, question, or experience.\n"
         "- Never generic ('great post!', 'so true', 'love this').\n"
@@ -49,7 +57,13 @@ def _fallback_reply(opportunity_text: str) -> str:
 
 
 def draft_one(
-    conn: sqlite3.Connection, opportunity_id: int, config: Config, llm: LLMClient | None
+    conn: sqlite3.Connection,
+    opportunity_id: int,
+    config: Config,
+    llm: LLMClient | None,
+    *,
+    hints: str | None = None,
+    voice: str = "",
 ) -> int:
     """Draft a reply for one opportunity. Returns the reply_draft id."""
     opp = conn.execute(
@@ -63,7 +77,7 @@ def draft_one(
         recent = _recent_sent_replies(conn)
         text = llm.complete(
             model=config.models.draft,
-            system=_system_prompt(config, recent),
+            system=_system_prompt(config, recent, hints, voice),
             user=f"Post by @{opp['author_handle']}:\n{opp['text']}",
             max_tokens=300,
         )
@@ -95,7 +109,12 @@ def draft_one(
 
 
 def draft_pending(
-    conn: sqlite3.Connection, config: Config, llm: LLMClient | None = None
+    conn: sqlite3.Connection,
+    config: Config,
+    llm: LLMClient | None = None,
+    *,
+    hints: str | None = None,
+    voice: str = "",
 ) -> list[int]:
     """Draft replies for the top queued opportunities, up to the daily queue size."""
     rows = conn.execute(
@@ -103,4 +122,4 @@ def draft_pending(
         "ORDER BY rank ASC, relevance_score DESC LIMIT ?",
         (config.daily_reply_queue_size,),
     ).fetchall()
-    return [draft_one(conn, r["id"], config, llm) for r in rows]
+    return [draft_one(conn, r["id"], config, llm, hints=hints, voice=voice) for r in rows]

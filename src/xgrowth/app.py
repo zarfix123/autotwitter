@@ -29,13 +29,15 @@ from dotenv import load_dotenv
 
 from . import (
     analytics,
+    content_planner,
     db,
+    git_watcher,
     live_reply,
     monitor,
-    news_content_gen,
     news_watcher,
     pipeline,
     reply_drafter,
+    voice,
     x_auth,
 )
 from . import poster as poster_mod
@@ -168,15 +170,26 @@ async def main_async() -> None:
     news_classifier: Classifier = (
         make_news_classifier(llm, config.models.classify) if llm else news_heuristic_classifier
     )
+    # Blog voice source (GitHub-backed; None when no blog repo configured).
+    blog_source = (
+        voice.GitHubBlogSource(config.voice_blog_repo, config.voice_blog_path, secrets.github_token)
+        if config.voice_blog_repo
+        else None
+    )
 
     # ---- blocking job bodies (run via to_thread) ----
     def _watch_cycle() -> None:
         c = conn_factory()
         try:
-            ins = analytics.insights(c)  # feedback into drafting + timing
-            pipeline.watch_and_draft(
-                c, config, source, classifier, llm,
-                now=_now(), hints=ins.hint_text or None, preferred_hours=ins.best_hours or None,
+            voice.maybe_refresh(c, blog_source, llm, config, now=_now())  # blog -> voice profile
+            git_watcher.run(c, config, source, classifier)               # ingest commits
+            ins = analytics.insights(c)
+            content_planner.run(                                          # mixed daily posts
+                c, config, llm, now=_now(), voice=voice.voice_reference(c),
+                commit_hints=ins.hint_text or None, news_hints=ins.hint_text or None,
+            )
+            scheduler_mod.schedule_pending(
+                c, config, now=_now(), preferred_hours=ins.best_hours or None,
             )
         finally:
             c.close()
@@ -191,29 +204,26 @@ async def main_async() -> None:
     def _monitor_scan() -> None:
         c = conn_factory()
         try:
-            monitor.scan(c, config, reader, llm, now=_now())
-            reply_drafter.draft_pending(c, config, llm)
+            ri = analytics.reply_insights(c)  # learned author/topic re-ranking + drafting hint
+            monitor.scan(c, config, reader, llm, now=_now(), reply_insights=ri)
+            reply_drafter.draft_pending(c, config, llm, hints=ri.hint_text or None)
         finally:
             c.close()
 
     def _analytics_pull() -> None:
         c = conn_factory()
         try:
-            analytics.pull(c, config, reader, now=_now())
+            analytics.pull(c, config, reader, now=_now())          # our original posts
+            analytics.pull_replies(c, config, reader, now=_now())  # our sent replies
         finally:
             c.close()
 
     def _ai_news_tick() -> None:
         c = conn_factory()
         try:
-            ins = analytics.insights(c)  # same soft feedback as commit posts
+            # Discovery only — drafting/scheduling of news posts happens in the planner
+            # (watch_cycle), which balances them against commit posts.
             news_watcher.scan(c, config, news_source, news_classifier, now=_now())
-            news_content_gen.generate_news_drafts(
-                c, config, llm, now=_now(), hints=ins.hint_text or None
-            )
-            scheduler_mod.schedule_pending(
-                c, config, now=_now(), preferred_hours=ins.best_hours or None
-            )
         finally:
             c.close()
 

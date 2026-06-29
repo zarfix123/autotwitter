@@ -82,7 +82,10 @@ def test_news_and_commit_drafts_share_the_queue(conn, news_config, fake_llm):
     event_id = _insert_commit_event(conn)
     content_gen.generate_draft(conn, event_id, news_config, fake_llm)
     _insert_item(conn)
-    news_content_gen.generate_news_drafts(conn, news_config, fake_llm, now=NOW)
+    # Distinct body so the news post isn't flagged as a duplicate of the commit post.
+    news_content_gen.generate_news_drafts(
+        conn, news_config, FakeLLM(body="a fresh, different take on AI agents today"), now=NOW
+    )
 
     scheduled = schedule_pending(conn, news_config, now=NOW)
     assert len(scheduled) == 2
