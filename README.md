@@ -103,6 +103,11 @@ touch the engagement gate — that stays solely for follows/replies. Enable with
 
 ## Setup
 
+**New here? Read [SETUP.md](SETUP.md)** — the full zero-to-running guide: getting
+every credential (Anthropic, GitHub, X OAuth, Telegram), configuring the content mix,
+minting X tokens, deploying on a cheap VM, and a troubleshooting table of the real
+gotchas. The quick version:
+
 Requires Python 3.10+.
 
 ```bash
