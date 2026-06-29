@@ -120,13 +120,16 @@ def poll_repo(
     classifier: Classifier,
     config: Config,
     *,
-    default_lookback_hours: int = 48,
+    lookback_days: int | None = None,
 ) -> int | None:
-    """Poll one repo. Returns the new git_event id, or None if nothing new/meaningful."""
+    """Poll one repo. Returns the new git_event id, or None if nothing new/meaningful.
+
+    On a repo's first poll (no cursor) it backfills ``commit_window_days`` so the
+    selector has the full window of candidates; afterward it only sees new commits.
+    """
     last_polled_at, last_seen_sha = _get_cursor(conn, repo)
-    since = last_polled_at or (
-        datetime.now(UTC) - timedelta(hours=default_lookback_hours)
-    ).isoformat()
+    days = lookback_days if lookback_days is not None else config.commit_window_days
+    since = last_polled_at or (datetime.now(UTC) - timedelta(days=days)).isoformat()
 
     commits = source.list_commits(repo, since=since, author=config.github_author or None)
     # Drop anything at/older than the last seen sha (GitHub `since` is time-based,
