@@ -77,6 +77,9 @@ class Config:
     voice_blog_repo: str = ""          # "owner/name", e.g. zarfix123/zarfix123.github.io
     voice_blog_path: str = "blog/posts"
     voice_refresh_days: int = 7
+    # Hard-locked public link per repo (full_name -> URL). Overrides auto-detection
+    # (GitHub homepage / repo URL) — use when a repo's homepage points somewhere wrong.
+    repo_links: dict[str, str] = field(default_factory=dict)
     models: Models = field(default_factory=Models)
 
     # ---- validation helpers -------------------------------------------------
@@ -173,6 +176,7 @@ def config_from_dict(raw: dict) -> Config:
         voice_blog_repo=str(raw.get("voice_blog_repo", "")),
         voice_blog_path=str(raw.get("voice_blog_path", "blog/posts")),
         voice_refresh_days=int(raw.get("voice_refresh_days", 7)),
+        repo_links=dict(raw.get("repo_links", {}) or {}),
         models=models,
     )
 

@@ -104,3 +104,20 @@ def test_commit_link_public_private_homepage(conn, config, sample_commits):
     assert links["zarfix123/pub"] == "https://github.com/zarfix123/pub"
     assert links["Hadeva-Dev/Tolus"] == ""           # private -> the poster adds no self-reply
     assert links["zarfix123/site"] == "https://tolus.dev"
+
+
+def test_repo_links_override_beats_homepage(conn, config, sample_commits):
+    # A private repo whose GitHub homepage points at a login-gated deploy: the
+    # hard-locked repo_links override must win and post the canonical public URL.
+    cfg = replace(
+        config,
+        watch_all_repos=True,
+        repo_links={"Hadeva-Dev/Tolus": "https://www.tolus.dev"},
+    )
+    repos = [
+        Repo("Hadeva-Dev", "Tolus", private=True,
+             homepage="https://vercel.com/sso/access/request?next=tolus-tolus.vercel.app"),
+    ]
+    git_watcher.run(conn, cfg, FakeCommitSource(sample_commits, repos=repos), always_meaningful)
+    link = conn.execute("SELECT link FROM git_events").fetchone()["link"]
+    assert link == "https://www.tolus.dev"  # override beats the gated homepage

@@ -37,10 +37,19 @@ def dedup_key(repo_full_name: str, shas: list[str]) -> str:
     return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _commit_link(repo: Repo) -> str:
-    """Public link for a commit post: the project homepage if set, else the GitHub URL
-    if the repo is public, else "" — a private repo with no public URL gets NO link
-    (the poster skips the self-reply rather than leaking a 404 to a private repo)."""
+def _commit_link(repo: Repo, config: Config) -> str:
+    """Public link for a commit post, in priority order:
+
+    1. a hard-locked `repo_links` override (full control — beats everything, used
+       when a repo's GitHub homepage points somewhere wrong, e.g. a gated deploy);
+    2. the GitHub "Website"/homepage field if set;
+    3. the GitHub repo URL if the repo is public;
+    4. "" — a private repo with no public URL gets NO link (the poster skips the
+       self-reply rather than leaking a 404 / login wall).
+    """
+    override = config.repo_links.get(repo.full_name)
+    if override:
+        return override
     if repo.homepage:
         return repo.homepage
     if not repo.private:
@@ -180,7 +189,7 @@ def poll_repo(
             key,
             1 if result.meaningful else 0,
             result.topic,
-            _commit_link(repo),
+            _commit_link(repo, config),
             now,
         ),
     )
