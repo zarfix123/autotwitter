@@ -80,3 +80,11 @@ def test_pending_items_lists_replies_and_follows(conn, config):
 
 def test_callback_roundtrip_parse():
     assert telegram_bot.parse_callback(make_callback("approve", "reply", 12)) == ("approve", "reply", 12)
+
+
+def test_help_text_lists_every_command():
+    help_text = telegram_bot.HELP_TEXT
+    for cmd in ("/status", "/queue", "/now", "/kill", "/resume", "/help"):
+        assert cmd in help_text, f"{cmd} missing from /help"
+    # mentions the approval model
+    assert "Approve" in help_text

@@ -22,6 +22,20 @@ from .engagement import XEngager, engagement_gate, mint_approval_token
 
 ConnFactory = Callable[[], sqlite3.Connection]
 
+HELP_TEXT = (
+    "X Growth Engine — commands\n"
+    "\n"
+    "/status  — draft counts (pending / scheduled / posted) + weekly spend + paused flag\n"
+    "/queue   — show the current pending reply/follow approval batch\n"
+    "/now     — push the approval batch to you right now\n"
+    "/kill    — kill switch: pause posting and clear the queued drafts\n"
+    "/resume  — resume posting after a /kill\n"
+    "/help    — show this message\n"
+    "\n"
+    "When I send you a drafted reply or follow, tap Approve to send it or Skip to "
+    "discard it. Approve is the only thing that ever engages another account."
+)
+
 
 # --- callback-data helpers ----------------------------------------------------
 def make_callback(decision: str, item_type: str, item_id: int) -> str:
@@ -171,6 +185,9 @@ def build_application(
         finally:
             conn.close()
 
+    async def cmd_help(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        await update.message.reply_text(HELP_TEXT)
+
     async def on_callback(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         await query.answer()
@@ -190,6 +207,7 @@ def build_application(
     app.add_handler(CommandHandler("now", cmd_now, filters=only_me))
     app.add_handler(CommandHandler("kill", cmd_kill, filters=only_me))
     app.add_handler(CommandHandler("resume", cmd_resume, filters=only_me))
+    app.add_handler(CommandHandler("help", cmd_help, filters=only_me))
     app.add_handler(CallbackQueryHandler(on_callback))
     return app
 
