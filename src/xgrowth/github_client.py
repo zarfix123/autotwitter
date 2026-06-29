@@ -76,10 +76,12 @@ class GitHubCommitSource:
         return commits
 
     def list_repos(self, *, since_pushed: str | None = None) -> list[Repo]:
-        """All repos the authenticated user owns (incl. private), pushed-desc.
+        """Every repo the authenticated user can access — owned, collaborator, or
+        org-member (incl. private) — pushed-desc.
 
         Requires a token (uses /user/repos). Stops early once repos fall outside the
-        ``since_pushed`` window, since results are sorted by push time.
+        ``since_pushed`` window, since results are sorted by push time. Commits are
+        still author-filtered downstream, so only the user's own commits are posted.
         """
         import requests  # lazy
 
@@ -90,7 +92,7 @@ class GitHubCommitSource:
                 f"{self.API}/user/repos",
                 headers=self._headers(),
                 params={"per_page": "100", "page": str(page), "sort": "pushed",
-                        "affiliation": "owner"},
+                        "affiliation": "owner,collaborator,organization_member"},
                 timeout=30,
             )
             resp.raise_for_status()
