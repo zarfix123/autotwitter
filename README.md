@@ -1,207 +1,83 @@
 # autotwitter — X Growth Engine
 
 A compliance-first personal X (Twitter) growth tool for building in public. It
-**fully automates original posting** (the only thing X's 2026 rules allow to be
-automated) and keeps a **real human in the loop** for every engagement action.
+**fully automates original posting** — the one thing X's rules allow to be automated —
+and keeps a **human in the loop for every engagement** (replies, follows).
 
-> **Status:** Phases 1–3 implemented and tested (128 tests): zero-touch posting,
-> the growth engine + Telegram approval + engagement gate, the analytics feedback
-> loop + live-reply notifier, and an optional AI-news content source (Hacker News
-> discovery + Claude web-search grounding) that auto-posts opinions/tie-ins inside
-> your daily cap. Phase 4 (deploy slice) is done — see `Roadmap` below.
+→ **Setup:** [SETUP.md](SETUP.md) (zero to running) · **Deploy:** [DEPLOY.md](DEPLOY.md)
 
-## The one rule that shapes everything
+## The safety model
 
-X bans accounts on *behavioral patterns*, regardless of who clicked a button. So
-this tool **never** auto-likes/follows/replies/reposts/DMs. That isn't a flag — it
-is structural:
+X bans accounts on *behavioral patterns*, not on who clicked the button — so this tool
+**never** auto-likes/follows/replies/reposts/DMs. That's structural, not a flag. There
+are three separate X surfaces, and the separation *is* the safety model:
 
-There are **three separate X surfaces**, and the separation *is* the safety model:
+- **Poster** — original tweets + replies to *your own* tweets only.
+- **Reader** — read-only search/timelines/lookups. Can't post or engage.
+- **Engager** (reply-to-others, follow) — reachable **only** through an
+  `engagement_gate` that requires a fresh, single-use, item-bound token, minted
+  **only** by a real one-tap approval from the allow-listed Telegram user.
 
-- `x_client.XPoster` (original posting) — original tweets + reply to **our own**
-  tweet only. No other-account interaction.
-- `x_read.XReader` (read-only) — search/timelines/user lookups. Cannot post or engage.
-- `engagement.XEngager` (reply-to-others, follow) — reachable **only** through
-  `engagement_gate`, which requires a fresh, single-use, item-bound approval token.
-  Tokens are minted **only** by a real Telegram tap from the allow-listed user
-  (`mint_approval_token`), enforced item-by-item. There is no "agent/script approves
-  the queue" mode, and a static test (`tests/test_guardrail.py`) fails CI if any
-  engagement endpoint, the gate, or token-minting leaks outside those modules.
+A static test (`tests/test_guardrail.py`) fails CI if any engagement endpoint, the
+gate, or token-minting ever leaks outside those modules. Other guardrails: secrets are
+scrubbed before anything reaches the model; links go in the first reply (never the
+body); posting is capped, spaced, and jittered; a kill switch pauses + clears the
+queue; everything is audit-logged; API spend is tracked against a weekly cap.
 
-Other guardrails already in place: secrets are scrubbed out of repo content before
-anything reaches Claude or a draft; links go in the first reply (never the body);
-posting is capped, spaced, and jittered; a kill switch pauses posting and clears
-the queue; every action is audit-logged; API spend is tracked against a weekly cap.
+## What it does
 
-## How Phase 1 works
+- **Posts about your work** — polls your repos, picks the most post-worthy commit from
+  the last N days (not every commit), and drafts it in your voice.
+- **Posts about AI news** — pulls trending stories (Hacker News) and drafts a grounded
+  opinion or a tie-in to your work, using Claude's web search. *(Optional.)*
+- **Balances the mix** — a daily planner blends work / outside-world / tie-in posts up
+  to your `posts_per_day`, and de-dupes so it never says the same thing twice.
+- **Engagement, human-gated** — finds reply/follow opportunities, drafts sharp replies,
+  and pushes a one-tap Approve/Skip batch to your phone via Telegram. *(Optional.)*
+- **Learns over time** — pulls your own posts' metrics and steers topics, timing, and
+  which accounts/topics to reply to toward what actually performs.
+- **Sounds like you** — distills a writing-voice profile from your blog.
 
-```
-GitHub commits ─poll→ Git Watcher ─scrub+classify(Haiku)→ git_event (deduped)
-   → Content Generator (Sonnet, body URL-free + link as separate field)
-   → Scheduler (≤2/day, ≥3h apart, jittered, in your windows)
-   → Poster (body tweet first, then link as a reply to our own tweet)
-```
-
-It polls each watched repo's commits (no tags/releases/PRs needed), clusters new
-commits, asks the cheap model whether they're a meaningful build-in-public moment,
-drafts a post in your voice, schedules it into your active windows, and posts it.
-
-## How Phase 2 works (the 5-minutes-a-day layer)
+## How it works
 
 ```
-Monitor (read-only) ─rank(Haiku)→ reply_opportunities ─→ Reply Drafter (Sonnet)
-   → Telegram daily push (Approve / Skip buttons)
-   → Approve tap → mint token → engagement_gate → reply/follow sent (one action)
-   → Skip tap   → discarded; nothing sent
+commits ─┐
+AI news ─┤→ classify (Haiku) → content planner → draft (Sonnet, +web search)
+blog ────┘                         │                    │
+                                   ├→ de-dupe + voice ───┤
+                                   └→ scheduler (windows, caps, jitter) → Poster
+
+monitor (read-only) → rank → reply drafter → Telegram Approve/Skip → engagement gate → sent
+analytics (owned reads) → insights → soften drafting/timing/reply ranking
 ```
 
-The monitor reads target accounts + keyword searches, ranks by relevance ×
-freshness × account size, and queues opportunities — it never acts. Claude drafts a
-sharp, specific reply for each. Once a day (at a jittered time) the Telegram bot
-sends you the batch; you approve or skip with one tap. Approving is the *only* path
-that sends an engagement, and every approval is a fresh per-item token. Follows are
-optional, low-capped (`max_follows_per_day`, `0` disables), and paced
-(`follow_min_spacing_minutes`), enforced in the gate.
+Everything runs as one always-on process (scheduler + Telegram bot + a localhost admin
+API), needing **outbound network only**.
 
-## How Phase 3 works (gets better + reacts in real time)
+## Quickstart
 
-```
-analytics_pull (owned reads) → snapshots → insights(top topics, best hours)
-   → hint into the content generator   (drafts lean toward what lands)
-   → preferred hours into the scheduler (timing leans toward what lands)
-
-live_reply_tick → a target just posted (fresh)? → draft a reply now
-   → one-tap Telegram push → [your tap] → engagement gate → sent
-```
-
-- **Analytics feedback loop** (`analytics.py`) — periodically pulls your own posts'
-  metrics (cheap "owned" reads), stores a time series, and computes which topics and
-  posting hours perform best. Those signals are fed *softly* into drafting and timing
-  (only once there's enough data, so it doesn't over-fit). Deterministic, no LLM.
-- **Live-reply notifier** (`live_reply.py`) — checks high-value target accounts every
-  few minutes; when one posts something brand-new, it drafts a reply immediately and
-  pushes a single one-tap approval, so a timely reply can land while the post is still
-  climbing. It only reads and drafts — sending still goes through the same gate.
-
-## The AI-news content source (optional, off by default)
-
-```
-news_watcher.scan (Hacker News) → classify(Haiku) → news_items (deduped)
-   → news_content_gen (Sonnet + web search) → opinion / work tie-in draft
-   → same Scheduler + Poster (auto-posted, inside posts_per_day)
-```
-
-So posts ride current AI conversations, not just your commits. The watcher pulls
-trending AI stories from Hacker News (free Algolia API, no key), keeps the fresh,
-high-signal, on-topic ones, and the drafter asks Claude — *with the web search
-tool* — to ground a post in what's actually happening and write either a sharp
-opinion or a tie-in to your recent work (a deterministic `mix`). These are
-**original posts**: they auto-post exactly like commit posts, share your daily cap
-(with a `ai_news_max_per_day` sub-cap), feed the same analytics loop, and never
-touch the engagement gate — that stays solely for follows/replies. Enable with
-`ai_news_enabled: true`; the web-search call is cost-capped like every other read.
-
-## Setup
-
-**New here? Read [SETUP.md](SETUP.md)** — the full zero-to-running guide: getting
-every credential (Anthropic, GitHub, X OAuth, Telegram), configuring the content mix,
-minting X tokens, deploying on a cheap VM, and a troubleshooting table of the real
-gotchas. The quick version:
-
-Requires Python 3.10+.
+Requires **Python 3.10+** (or just use Docker — see [DEPLOY.md](DEPLOY.md)).
 
 ```bash
-pip install -r requirements.txt          # runtime
-pip install -r requirements-dev.txt      # + tests/lint
-
-cp .env.example .env                      # fill in secrets
-cp config.example.yaml config.yaml        # edit repos, voice, windows, cadence
-```
-
-- `.env` holds secrets (Anthropic key, GitHub PAT, X OAuth 2.0 user tokens,
-  Telegram). Never commit it. `XGROWTH_DRY_RUN=1` (the default) means no live
-  tweets — the poster logs synthetic ids so you can watch the pipeline safely.
-- `config.yaml` holds all behavior (watched repos, topic clusters, voice samples,
-  posting windows, `posts_per_day`, caps, cost cap, model choices).
-
-## Run
-
-```bash
-# from the repo root
+cp .env.example .env                 # secrets (gitignored)
+cp config.example.yaml config.yaml   # behavior (gitignored)
+pip install -r requirements.txt
 PYTHONPATH=src python -m xgrowth.app
 ```
 
-This runs the async loop: the Telegram approval bot (if configured), the scheduler
-jobs (`watch_cycle`/30m, `post_tick`/1m, `monitor_scan`/configurable,
-`reply_reminder`/daily-jittered, `analytics_pull`/configurable,
-`live_reply_tick`/configurable), and the FastAPI admin server in a thread.
+`XGROWTH_DRY_RUN=1` (the default) posts nothing — the poster logs synthetic ids so you
+can watch the pipeline safely. [SETUP.md](SETUP.md) covers credentials, the X OAuth
+mint, going live, and a troubleshooting table.
 
-Admin endpoints (default `http://127.0.0.1:8080`):
-
-| Method | Path            | What it does                                  |
-|--------|-----------------|-----------------------------------------------|
-| GET    | `/health`       | liveness                                      |
-| GET    | `/status`       | counts + weekly spend + paused flag           |
-| POST   | `/admin/kill`   | **kill switch**: pause posting, clear queue   |
-| POST   | `/admin/resume` | unpause                                        |
-
-### Telegram approval bot
-
-1. Create a bot with [@BotFather](https://t.me/BotFather) → put the token in
-   `TELEGRAM_BOT_TOKEN`. Message your bot once, then set `TELEGRAM_ALLOWED_USER_ID`
-   to your numeric Telegram user id (only that user can approve or command the bot).
-2. The bot DMs you a daily batch of drafted replies (and any follow candidates) with
-   Approve/Skip buttons. Commands: `/status`, `/queue`, `/now` (push the batch on
-   demand), `/kill`, `/resume`. All restricted to the allow-listed user.
-3. In `XGROWTH_DRY_RUN=1` the engager is a no-op, so you can do the full approval
-   round-trip without sending anything live.
-
-### Going live
-
-1. Run with `XGROWTH_DRY_RUN=1` first and watch `/status` + the audit log fill in.
-2. Mint X OAuth 2.0 **user-context** tokens (scopes `tweet.write` + `offline.access`):
-
-   ```bash
-   python scripts/x_oauth.py --redirect-uri "https://127.0.0.1/callback"
-   ```
-
-   Paste the printed `X_ACCESS_TOKEN` / `X_REFRESH_TOKEN` (and `X_CLIENT_ID` /
-   `X_CLIENT_SECRET`) into `.env`. Never use password login or browser automation
-   (both are bannable). The access token expires every ~2h; with a refresh token
-   present, the runtime auto-refreshes and persists it (`x_auth.py`), so the bot
-   keeps posting unattended. Without `offline.access` you'd have to re-mint by hand.
-3. Set `XGROWTH_DRY_RUN=0` to post for real.
-
-### Deploy (any cheap always-on instance, e.g. AWS Lightsail/EC2)
-
-Polling needs no inbound port. Ship it with Docker (`docker compose up -d`) or
-systemd — both are covered, with a first-run dry-run smoke test, in **[DEPLOY.md](DEPLOY.md)**.
+Control it from Telegram (`/status`, `/now`, `/kill`, `/resume`) or the admin API
+(`/health`, `/status`, `POST /admin/kill`, `POST /admin/resume`, bound to `127.0.0.1`).
 
 ## Develop
 
 ```bash
-PYTHONPATH=src python -m pytest -q     # 128 tests, no network/keys needed
-python -m ruff check .                  # lint
+PYTHONPATH=src python -m pytest -q   # offline — no network or keys needed
+python -m ruff check .
 ```
 
-The LLM, GitHub source, and all three X surfaces (poster, reader, engager) are
-injectable, so the whole pipeline — including the approval round-trip — runs offline
-in tests via fakes. `python-telegram-bot` is only needed to actually run the bot;
-the decision logic is tested without it.
-
-## Roadmap
-
-- **Phase 1 — done:** git watcher, secret scrubber, content generator, scheduler,
-  poster, audit log, cost tracker, kill switch.
-- **Phase 2 — done:** read-only monitor + reply drafter + Telegram approval bot + the
-  engagement gate (per-item human approval tokens) + paced follow candidates +
-  static guardrail test.
-- **Phase 3 — done:** analytics pull + feedback into the generator/scheduler +
-  live-reply notifier.
-- **Phase 4 (deploy slice) — done:** Dockerfile, docker-compose, systemd unit, and the
-  [DEPLOY.md](DEPLOY.md) runbook. Further hardening (cost dashboard, structured logging,
-  expanded guardrail assertions) deferred until needed.
-- **AI-news content source — done:** Hacker News discovery + Claude web-search-grounded
-  opinion/tie-in drafting, auto-posted inside the daily cap (`ai_news_*` config).
-
-See `/root/.claude/plans/x-growth-engine-structured-waffle.md` for the full plan.
+The LLM, GitHub source, and all three X surfaces are injectable, so the whole pipeline
+— including the approval round-trip — runs offline in tests via fakes.
