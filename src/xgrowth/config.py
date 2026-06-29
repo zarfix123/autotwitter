@@ -67,6 +67,10 @@ class Config:
     # Commit selection (windowed best-pick) + content mix.
     commit_window_days: int = 7
     commit_posts_per_day: int = 1
+    # Watch-all-repos: auto-discover every repo you own (incl. private + future ones)
+    # instead of using the explicit `repos` list. Requires a GitHub token.
+    watch_all_repos: bool = False
+    watch_all_repos_days: int = 14  # only poll repos pushed within this many days
     # Writing voice distilled from the blog (empty repo = use static voice_samples).
     voice_blog_repo: str = ""          # "owner/name", e.g. zarfix123/zarfix123.github.io
     voice_blog_path: str = "blog/posts"
@@ -162,6 +166,8 @@ def config_from_dict(raw: dict) -> Config:
         ai_news_style=str(raw.get("ai_news_style", "mix")),
         commit_window_days=int(raw.get("commit_window_days", 7)),
         commit_posts_per_day=int(raw.get("commit_posts_per_day", 1)),
+        watch_all_repos=bool(raw.get("watch_all_repos", False)),
+        watch_all_repos_days=int(raw.get("watch_all_repos_days", 14)),
         voice_blog_repo=str(raw.get("voice_blog_repo", "")),
         voice_blog_path=str(raw.get("voice_blog_path", "blog/posts")),
         voice_refresh_days=int(raw.get("voice_refresh_days", 7)),

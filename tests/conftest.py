@@ -103,15 +103,20 @@ class FakeNewsSource:
 
 
 class FakeCommitSource:
-    """Returns a fixed commit list; records calls."""
+    """Returns a fixed commit list; records calls. ``repos`` feeds watch-all mode."""
 
-    def __init__(self, commits: list[Commit]):
+    def __init__(self, commits: list[Commit], repos: list | None = None):
         self.commits = commits
+        self.repos = repos or []
         self.calls: list[dict] = []
 
     def list_commits(self, repo, since, author):
         self.calls.append({"repo": repo.full_name, "since": since, "author": author})
         return list(self.commits)
+
+    def list_repos(self, *, since_pushed=None):
+        self.calls.append({"list_repos": True, "since_pushed": since_pushed})
+        return list(self.repos)
 
 
 def always_meaningful(summary, clusters) -> ClassifyResult:

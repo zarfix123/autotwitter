@@ -29,6 +29,10 @@ class CommitSource(Protocol):
     def list_commits(self, repo: Repo, since: str | None, author: str | None) -> list[Commit]:
         ...
 
+    def list_repos(self, *, since_pushed: str | None = None) -> list[Repo]:
+        """Repos owned by the authenticated user, most-recently-pushed first."""
+        ...
+
 
 class GitHubCommitSource:
     """Real source backed by the GitHub REST API."""
@@ -70,6 +74,37 @@ class GitHubCommitSource:
                 )
             )
         return commits
+
+    def list_repos(self, *, since_pushed: str | None = None) -> list[Repo]:
+        """All repos the authenticated user owns (incl. private), pushed-desc.
+
+        Requires a token (uses /user/repos). Stops early once repos fall outside the
+        ``since_pushed`` window, since results are sorted by push time.
+        """
+        import requests  # lazy
+
+        repos: list[Repo] = []
+        page = 1
+        while True:
+            resp = requests.get(
+                f"{self.API}/user/repos",
+                headers=self._headers(),
+                params={"per_page": "100", "page": str(page), "sort": "pushed",
+                        "affiliation": "owner"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            batch = resp.json()
+            if not batch:
+                break
+            for item in batch:
+                if since_pushed and (item.get("pushed_at") or "") < since_pushed:
+                    return repos  # sorted newest-first -> everything after is older
+                repos.append(Repo(owner=item["owner"]["login"], name=item["name"]))
+            if len(batch) < 100:
+                break
+            page += 1
+        return repos
 
     def _list_files(self, repo: Repo, sha: str) -> list[str]:
         import requests  # lazy

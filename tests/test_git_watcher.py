@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from conftest import FakeCommitSource, always_meaningful
 from xgrowth import git_watcher
+from xgrowth.config import Repo
 from xgrowth.github_client import Commit
 
 
@@ -68,3 +71,22 @@ def test_dedup_key_is_order_independent():
     a = git_watcher.dedup_key("o/r", ["x", "y", "z"])
     b = git_watcher.dedup_key("o/r", ["z", "y", "x"])
     assert a == b
+
+
+def test_watch_all_repos_polls_discovered_repos(conn, config, sample_commits):
+    cfg = replace(config, watch_all_repos=True)
+    discovered = [Repo("zarfix123", "alpha"), Repo("zarfix123", "beta")]
+    source = FakeCommitSource(sample_commits, repos=discovered)
+    created = git_watcher.run(conn, cfg, source, always_meaningful)
+    # one event per discovered repo (each has the same fake commits, distinct dedup_key per repo)
+    assert len(created) == 2
+    repos_seen = {r["repo"] for r in conn.execute("SELECT repo FROM git_events").fetchall()}
+    assert repos_seen == {"zarfix123/alpha", "zarfix123/beta"}
+    # it asked the source to enumerate, with a pushed-since window
+    assert any(c.get("list_repos") and c["since_pushed"] for c in source.calls)
+
+
+def test_explicit_repos_mode_does_not_enumerate(conn, config, sample_commits):
+    source = FakeCommitSource(sample_commits, repos=[Repo("x", "y")])
+    git_watcher.run(conn, config, source, always_meaningful)  # watch_all_repos False
+    assert not any(c.get("list_repos") for c in source.calls)

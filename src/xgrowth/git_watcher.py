@@ -182,15 +182,24 @@ def poll_repo(
     return event_id
 
 
+def _repos_to_poll(config: Config, source: CommitSource) -> list[Repo]:
+    """The explicit `repos` list, or — in watch-all mode — every owned repo pushed
+    within `watch_all_repos_days` (auto-discovered, includes private + new repos)."""
+    if not config.watch_all_repos:
+        return config.repos
+    since = (datetime.now(UTC) - timedelta(days=config.watch_all_repos_days)).isoformat()
+    return source.list_repos(since_pushed=since)
+
+
 def run(
     conn: sqlite3.Connection,
     config: Config,
     source: CommitSource,
     classifier: Classifier,
 ) -> list[int]:
-    """Poll every configured repo. Returns the list of new git_event ids created."""
+    """Poll every watched repo. Returns the list of new git_event ids created."""
     created: list[int] = []
-    for repo in config.repos:
+    for repo in _repos_to_poll(config, source):
         event_id = poll_repo(conn, repo, source, classifier, config)
         if event_id is not None:
             created.append(event_id)

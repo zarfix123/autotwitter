@@ -182,7 +182,10 @@ async def main_async() -> None:
         c = conn_factory()
         try:
             voice.maybe_refresh(c, blog_source, llm, config, now=_now())  # blog -> voice profile
-            git_watcher.run(c, config, source, classifier)               # ingest commits
+            try:
+                git_watcher.run(c, config, source, classifier)           # ingest commits
+            except Exception:  # noqa: BLE001 — a GitHub hiccup must not block drafting
+                logger.exception("git_watcher failed; drafting from existing events")
             ins = analytics.insights(c)
             content_planner.run(                                          # mixed daily posts
                 c, config, llm, now=_now(), voice=voice.voice_reference(c),
