@@ -8,6 +8,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# tzdata so a TZ env var (set in .env) resolves — posting_windows are LOCAL time,
+# and slim images default to UTC without the zoneinfo files.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies first (cached layer); requirements.txt is also what
 # pyproject reads for the package's dynamic dependencies.
 COPY requirements.txt ./
