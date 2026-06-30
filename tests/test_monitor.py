@@ -45,6 +45,29 @@ def test_scan_creates_opportunities(conn, config):
     assert all(r["status"] == "queued" for r in rows)
 
 
+class _FlakyReader:
+    """Timelines succeed; keyword search throws (a transient X 5xx)."""
+
+    def user_recent(self, handle, max_results=5):
+        return [Tweet("t1", "levelsio", "u1", "shipping a new AI feature", FRESH, author_followers=50000)]
+
+    def search_recent(self, query, max_results=10):
+        raise RuntimeError("503 Service Unavailable")
+
+    def follower_counts(self, handles):
+        return {}
+
+    def tweet_metrics(self, ids):
+        return {}
+
+
+def test_scan_survives_one_failing_source(conn, config):
+    # A 503 on keyword search must NOT discard the timeline opportunities that
+    # succeeded — the scan completes with what it could gather.
+    created = monitor.scan(conn, config, _FlakyReader(), FakeRankLLM(), now=NOW)
+    assert len(created) == 1  # the timeline tweet still becomes an opportunity
+
+
 def test_scan_dedups_existing(conn, config):
     conn.execute(
         "INSERT INTO reply_opportunities(target_tweet_id, status, created_at) "

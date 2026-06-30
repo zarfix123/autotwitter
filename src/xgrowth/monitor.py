@@ -9,6 +9,7 @@ and performs no writes to X — it only reads and ranks.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import sqlite3
 from datetime import UTC, datetime
@@ -18,6 +19,8 @@ from .analytics import ReplyInsights
 from .config import Config
 from .llm import LLMClient
 from .x_read import Tweet, XReader
+
+logger = logging.getLogger(__name__)
 
 
 def _age_minutes(created_at: str, now: datetime) -> float | None:
@@ -81,15 +84,24 @@ def rank_relevance(
 
 
 def _gather(config: Config, reader: XReader) -> list[Tweet]:
+    """Pull candidate tweets from each account + keyword. One source failing (a
+    transient X 5xx, a rate-limit, a bad handle) is logged and skipped — it must
+    never abort the whole scan and discard the sources that did succeed."""
     seen: dict[str, Tweet] = {}
     for handle in config.target_accounts:
-        for t in reader.user_recent(handle, max_results=5):
-            seen.setdefault(t.id, t)
+        try:
+            for t in reader.user_recent(handle, max_results=5):
+                seen.setdefault(t.id, t)
+        except Exception:  # noqa: BLE001 — one bad account must not sink the scan
+            logger.warning("monitor: timeline read failed for @%s; skipping", handle, exc_info=True)
     for kw in config.keywords:
         # Exclude retweets/replies; recent English originals are best reply targets.
         query = f"{kw} -is:retweet -is:reply lang:en"
-        for t in reader.search_recent(query, max_results=10):
-            seen.setdefault(t.id, t)
+        try:
+            for t in reader.search_recent(query, max_results=10):
+                seen.setdefault(t.id, t)
+        except Exception:  # noqa: BLE001 — one bad keyword search must not sink the scan
+            logger.warning("monitor: search failed for %r; skipping", kw, exc_info=True)
     return list(seen.values())
 
 

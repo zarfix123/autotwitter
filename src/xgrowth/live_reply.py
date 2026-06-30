@@ -11,6 +11,7 @@ enforces that this file never references the gate, the engager, or token minting
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import UTC, datetime
 
@@ -19,6 +20,8 @@ from .config import Config
 from .llm import LLMClient
 from .monitor import _age_minutes
 from .x_read import XReader
+
+logger = logging.getLogger(__name__)
 
 
 def scan_live(
@@ -48,7 +51,11 @@ def scan_live(
 
     drafted: list[int] = []
     for handle in config.target_accounts:
-        latest = reader.user_recent(handle, max_results=1)
+        try:
+            latest = reader.user_recent(handle, max_results=1)
+        except Exception:  # noqa: BLE001 — one bad/transient read must not sink the scan
+            logger.warning("live_reply: read failed for @%s; skipping", handle, exc_info=True)
+            continue
         if not latest:
             continue
         tweet = latest[0]
