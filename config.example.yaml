@@ -83,8 +83,8 @@ live_reply_min_followers: 0
 ai_news_enabled: false        # off by default; flip to true to go live
 ai_news_interval_hours: 6     # how often to discover + draft AI-news posts
 ai_news_max_per_day: 1        # sub-cap; shares the posts_per_day budget (<= posts_per_day)
-news_min_points: 50           # ignore Hacker News stories below this score (signal floor)
-news_item_max_age_hours: 24   # only consider stories newer than this
+news_min_points: 15           # ignore Hacker News stories below this score (popularity-ranked, so this is a real floor)
+news_item_max_age_hours: 48   # consider trending stories from the last 2 days
 ai_news_style: mix            # mix | opinion | tie_in (relate the news to your recent work)
 
 # Whether I have X Premium (affects expected reach, not behavior).

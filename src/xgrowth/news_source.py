@@ -54,9 +54,16 @@ def _hn_item_from_hit(hit: dict) -> NewsItem:
 
 
 class HackerNewsSource:
-    """Trending stories from Hacker News via the Algolia search API (no key needed)."""
+    """Trending stories from Hacker News via the Algolia search API (no key needed).
 
-    API = "https://hn.algolia.com/api/v1/search_by_date"
+    Uses the relevance/popularity-ranked ``search`` endpoint (NOT ``search_by_date``):
+    within the recency window it surfaces stories with real traction first, so the
+    points floor in ``news_watcher`` actually has high-signal candidates to keep.
+    ``search_by_date`` returns newest-first, which is almost all just-posted, near-zero-
+    point stories — nothing clears the floor and no news ever gets drafted.
+    """
+
+    API = "https://hn.algolia.com/api/v1/search"
 
     def __init__(self, *, hits_per_page: int = 20) -> None:
         self._hits_per_page = hits_per_page

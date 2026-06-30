@@ -63,8 +63,8 @@ class Config:
     ai_news_enabled: bool = False
     ai_news_interval_hours: int = 6
     ai_news_max_per_day: int = 1
-    news_min_points: int = 50
-    news_item_max_age_hours: int = 24
+    news_min_points: int = 15
+    news_item_max_age_hours: int = 48
     ai_news_style: str = "mix"  # mix | opinion | tie_in
     # Commit selection (windowed best-pick) + content mix.
     commit_window_days: int = 7
@@ -166,8 +166,8 @@ def config_from_dict(raw: dict) -> Config:
         ai_news_enabled=bool(raw.get("ai_news_enabled", False)),
         ai_news_interval_hours=int(raw.get("ai_news_interval_hours", 6)),
         ai_news_max_per_day=int(raw.get("ai_news_max_per_day", 1)),
-        news_min_points=int(raw.get("news_min_points", 50)),
-        news_item_max_age_hours=int(raw.get("news_item_max_age_hours", 24)),
+        news_min_points=int(raw.get("news_min_points", 15)),
+        news_item_max_age_hours=int(raw.get("news_item_max_age_hours", 48)),
         ai_news_style=str(raw.get("ai_news_style", "mix")),
         commit_window_days=int(raw.get("commit_window_days", 7)),
         commit_posts_per_day=int(raw.get("commit_posts_per_day", 1)),

@@ -20,6 +20,9 @@ from . import cost
 
 # A static token string or a provider that returns a current token (auto-refresh).
 TokenSource = Callable[[], str] | str
+# Returns a fresh DB connection. The reader runs inside scheduler worker threads, so
+# it must NOT hold a connection created elsewhere — SQLite forbids cross-thread use.
+ConnFactory = Callable[[], sqlite3.Connection]
 
 
 @dataclass
@@ -83,11 +86,11 @@ class FakeXReader:
 class RealXReader:
     """tweepy-backed read-only client (OAuth 2.0 bearer / user token)."""
 
-    def __init__(self, token_source: TokenSource, conn: sqlite3.Connection | None = None) -> None:
+    def __init__(self, token_source: TokenSource, conn_factory: ConnFactory | None = None) -> None:
         self._provider = token_source if callable(token_source) else (lambda: token_source)
         self._token: str | None = None
         self._client = None
-        self._conn = conn
+        self._conn_factory = conn_factory
 
     def _c(self):
         """Current tweepy client, rebuilt when the provider returns a refreshed token."""
@@ -100,8 +103,14 @@ class RealXReader:
         return self._client
 
     def _record(self, op: str, count: int) -> None:
-        if self._conn is not None and count:
-            cost.record_x(self._conn, op, count)
+        # Open a short-lived connection per call: the reader is shared across worker
+        # threads, so it cannot reuse a connection bound to the thread that built it.
+        if self._conn_factory is not None and count:
+            conn = self._conn_factory()
+            try:
+                cost.record_x(conn, op, count)
+            finally:
+                conn.close()
 
     def search_recent(self, query: str, max_results: int = 10) -> list[Tweet]:
         resp = self._c().search_recent_tweets(

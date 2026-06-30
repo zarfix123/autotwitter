@@ -36,3 +36,13 @@ def test_created_at_derived_from_epoch_when_iso_missing():
     )
     assert item.item_created_at is not None
     assert item.item_created_at.startswith("2025-")  # parsed from the epoch
+
+
+def test_uses_popularity_search_endpoint_not_newest_first():
+    # Regression guard: 'search' (popularity-ranked) surfaces stories with real
+    # traction so the points floor has candidates. 'search_by_date' returns newest-
+    # first near-zero-point stories and nothing ever clears the floor.
+    from xgrowth.news_source import HackerNewsSource
+
+    assert HackerNewsSource.API.endswith("/search")
+    assert "search_by_date" not in HackerNewsSource.API

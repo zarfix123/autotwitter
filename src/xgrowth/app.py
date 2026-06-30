@@ -82,7 +82,9 @@ def build_runtime(secrets: Secrets, config: Config, conn_factory):
             seed=x_auth.build_seed(secrets.x_access_token, secrets.x_refresh_token),
         )
         poster: XPoster = RealXPoster(provider.token)
-        reader: XReader = RealXReader(provider.token, conn=conn_factory())
+        # Pass the factory (not a live connection): the reader runs on scheduler worker
+        # threads and must open its own per-call connection for cost recording.
+        reader: XReader = RealXReader(provider.token, conn_factory=conn_factory)
         engager: XEngager = RealXEngager(provider.token)
         if not secrets.x_refresh_token:
             logger.warning(
