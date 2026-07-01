@@ -131,6 +131,9 @@ class RealXReader:
         resp = self._c().get_users_tweets(
             id=user.data.id,
             max_results=max(5, min(max_results, 100)),
+            # Retweets and replies are not valid reply targets (replying to a retweet
+            # gives X's 403 "reply not allowed"); only original posts are.
+            exclude=["retweets", "replies"],
             tweet_fields=["created_at", "author_id"],
             expansions=["author_id"],
             user_fields=["username", "public_metrics"],

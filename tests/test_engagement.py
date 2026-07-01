@@ -63,6 +63,30 @@ def test_valid_reply_sends_once_and_consumes_token(conn, config):
     assert used is not None
 
 
+def test_reply_not_allowed_surfaces_clear_reason(conn, config):
+    # X returns 403 when the author restricted replies (or the target was a retweet).
+    # The gate must classify it as a clear, human message, not a cryptic engager_error.
+    draft_id = _reply_draft(conn)
+    token = _mint(conn, "reply", draft_id)
+
+    class BlockedEngager:
+        def reply_to(self, text, target_tweet_id):
+            raise RuntimeError(
+                "403 Forbidden\nReply to this conversation is not allowed because you "
+                "have not been mentioned or otherwise engaged by the author."
+            )
+
+        def follow(self, handle):
+            return True
+
+    result = engagement_gate(
+        conn, BlockedEngager(), "reply", draft_id, token,
+        allowed_user_id=ALLOWED, config=config, now=NOW,
+    )
+    assert not result.ok
+    assert "not allowed" in result.reason and result.reason != "engager_error"
+
+
 # ---- token-validation matrix (each must NOT call the engager) ----------------
 def test_no_token_rejected(conn, config):
     draft_id = _reply_draft(conn)

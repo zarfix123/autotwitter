@@ -225,11 +225,19 @@ def engagement_gate(
         else:
             result_id = _perform_follow(conn, engager, item_id)
     except Exception as exc:  # noqa: BLE001
+        msg = str(exc)
+        # X blocks replies when the author restricted who can reply (or the target
+        # was a retweet). That's a policy outcome, not a bug — surface it clearly.
+        reason = (
+            "reply not allowed (author restricted replies)"
+            if "not allowed" in msg.lower()
+            else "engager_error"
+        )
         audit.log(
             conn, "engagement.failed", entity_type=action, entity_id=item_id,
-            detail={"error": str(exc)},
+            detail={"error": msg},
         )
-        return GateResult(ok=False, reason="engager_error")
+        return GateResult(ok=False, reason=reason)
 
     audit.log(
         conn, "engagement.performed", entity_type=action, entity_id=item_id,
