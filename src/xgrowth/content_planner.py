@@ -70,21 +70,25 @@ def run(
         remaining -= len(ids)
 
     # 3) fallback — fill leftover slots from whichever side still has material, so the
-    #    day still targets posts_per_day even if one category came up empty.
+    #    day still targets posts_per_day even if one category came up empty. A category
+    #    with a 0 per-day cap is treated as OFF and is never used to backfill (so e.g.
+    #    commit_posts_per_day: 0 stays a pure no-commit day).
     while remaining > 0:
         before = remaining
-        n_ids = news_content_gen.generate_news_drafts(
-            conn, config, llm, now=now, hints=news_hints, voice=voice, limit=1
-        )
-        created["news"] += n_ids
-        remaining -= len(n_ids)
-        if remaining <= 0:
-            break
-        c_ids = content_gen.select_and_draft(
-            conn, config, llm, now=now, max_posts=1, hints=commit_hints, voice=voice
-        )
-        created["commit"] += c_ids
-        remaining -= len(c_ids)
+        if config.ai_news_max_per_day > 0:
+            n_ids = news_content_gen.generate_news_drafts(
+                conn, config, llm, now=now, hints=news_hints, voice=voice, limit=1
+            )
+            created["news"] += n_ids
+            remaining -= len(n_ids)
+            if remaining <= 0:
+                break
+        if config.commit_posts_per_day > 0:
+            c_ids = content_gen.select_and_draft(
+                conn, config, llm, now=now, max_posts=1, hints=commit_hints, voice=voice
+            )
+            created["commit"] += c_ids
+            remaining -= len(c_ids)
         if remaining == before:  # neither side produced anything new -> stop
             break
     return created

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from xgrowth import content_planner
@@ -96,6 +97,34 @@ def test_respects_posts_per_day_already_met(conn, news_config):
     created = content_planner.run(conn, news_config, FakePlannerLLM(), now=NOW)
     assert created == {"commit": [], "news": []}
     assert conn.execute("SELECT COUNT(*) FROM drafts").fetchone()[0] == 2
+
+
+def _pure_news_config(news_config):
+    # Locked testing config: exactly 1 pure AI-news opinion post/day, no commits.
+    return replace(
+        news_config, posts_per_day=1, commit_posts_per_day=0,
+        ai_news_max_per_day=1, ai_news_style="opinion",
+    )
+
+
+def test_locked_pure_news_one_opinion_post(conn, news_config):
+    cfg = _pure_news_config(news_config)
+    _commit_event(conn, "- shipped the live scheduler", "k1")  # exists but must be ignored
+    _news_item(conn, item_id="101", url="https://e.com/a", title="OpenAI ships an agent framework")
+    created = content_planner.run(conn, cfg, FakePlannerLLM(), now=NOW)
+    assert created["commit"] == []            # never a commit post
+    assert len(created["news"]) == 1          # exactly one news post
+    rows = conn.execute("SELECT category FROM drafts").fetchall()
+    assert [r["category"] for r in rows] == ["opinion"]  # pure opinion, not tie_in/commit
+
+
+def test_locked_pure_news_no_commit_fallback_when_news_dry(conn, news_config):
+    # No news items available -> must NOT fall back to a commit post (stays pure/empty).
+    cfg = _pure_news_config(news_config)
+    _commit_event(conn, "- shipped the live scheduler", "k1")
+    created = content_planner.run(conn, cfg, FakePlannerLLM(), now=NOW)
+    assert created == {"commit": [], "news": []}
+    assert conn.execute("SELECT COUNT(*) FROM drafts").fetchone()[0] == 0
 
 
 def test_dedup_drops_identical_cross_category(conn, news_config):
