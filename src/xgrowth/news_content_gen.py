@@ -123,11 +123,14 @@ def generate_news_drafts(
     hints: str | None = None,
     voice: str = "",
     limit: int | None = None,
+    force_style: str | None = None,
 ) -> list[int]:
     """Draft posts for the top unconsumed news items.
 
     ``limit`` (from the content planner) sets how many to create this call; without
-    it, the daily sub-cap (``ai_news_max_per_day``) applies.
+    it, the daily sub-cap (``ai_news_max_per_day``) applies. ``force_style``
+    ("opinion"/"tie_in") overrides ai_news_style for these drafts — the planner uses
+    it to guarantee a pure-opinion post regardless of the global style.
     """
     if not config.ai_news_enabled:
         return []
@@ -154,7 +157,7 @@ def generate_news_drafts(
     for item in rows:
         if len(created) >= remaining:
             break
-        style = _pick_style(config, item["item_id"], bool(recent_work))
+        style = force_style or _pick_style(config, item["item_id"], bool(recent_work))
         recent_posts = dedupe.recent_post_texts(conn)
         if llm is not None:
             text, _citations = llm.complete_with_search(

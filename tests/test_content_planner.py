@@ -99,6 +99,35 @@ def test_respects_posts_per_day_already_met(conn, news_config):
     assert conn.execute("SELECT COUNT(*) FROM drafts").fetchone()[0] == 2
 
 
+def test_guaranteed_news_post_is_pure_opinion_regardless_of_style(conn, news_config):
+    # One post/day is ALWAYS a pure opinion AI-news post; the other is the best
+    # available (here: a commit). Even with ai_news_style=tie_in, the guaranteed
+    # post is opinion, never a tie-in.
+    cfg = replace(
+        news_config, posts_per_day=2, commit_posts_per_day=1,
+        ai_news_max_per_day=2, ai_news_style="tie_in",
+    )
+    _commit_event(conn, "- shipped the ranking engine", "k1")
+    _news_item(conn, item_id="101", url="https://e.com/a", title="OpenAI ships an agent framework")
+    content_planner.run(conn, cfg, FakePlannerLLM(), now=NOW)
+    cats = sorted(r["category"] for r in conn.execute("SELECT category FROM drafts").fetchall())
+    assert cats == ["commit", "opinion"]  # pure opinion news + best-available commit
+
+
+def test_second_slot_falls_back_to_news_when_no_commit(conn, news_config):
+    # No commit material -> guaranteed opinion post + a second AI-news post fill the day.
+    cfg = replace(
+        news_config, posts_per_day=2, commit_posts_per_day=1,
+        ai_news_max_per_day=2, ai_news_style="mix",
+    )
+    for i in range(2):
+        _news_item(conn, item_id=f"n{i}", url=f"https://e.com/{i}", title=f"AI agents story {i}")
+    created = content_planner.run(conn, cfg, FakePlannerLLM(), now=NOW)
+    assert created["commit"] == []
+    assert len(created["news"]) == 2  # guaranteed opinion + one more news
+    assert conn.execute("SELECT COUNT(*) FROM drafts").fetchone()[0] == 2
+
+
 def _pure_news_config(news_config):
     # Locked testing config: exactly 1 pure AI-news opinion post/day, no commits.
     return replace(

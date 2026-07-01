@@ -1,17 +1,20 @@
 """Daily content-mix planner.
 
-Decides the day's original posts as a *blend* of three categories instead of letting
-each producer flood the queue:
+Decides the day's original posts as a *blend* instead of letting each producer flood
+the queue. The categories:
 
+  * opinion — a pure take on trending AI news (the outside world)
   * commit  — about the founder's work (windowed best-pick from recent commits)
-  * opinion — about the outside world (AI news)
   * tie_in  — the founder's work related to what's trending (the bridge)
 
-It targets ``posts_per_day`` total, aims for the soft per-category split
-(``commit_posts_per_day`` + ``ai_news_max_per_day``), and falls back to filling any
-empty slot from whichever side still has material — so it reliably hits the daily
-target even on a quiet-commit or quiet-news day. Each producer de-dups internally,
-so the same thing is never posted twice.
+Shape of a day (targeting ``posts_per_day``):
+  1. GUARANTEED: exactly one pure ``opinion`` AI-news post, always — never a tie-in.
+  2. BEST-AVAILABLE: the remaining slot(s) prefer a ``commit`` post (your recent
+     work); if there's no commit material they fall back to another AI-news post
+     (``opinion``/``tie_in`` per ai_news_style).
+
+So a normal day is 1 opinion + 1 commit; a no-commit day is 1 opinion + 1 more news.
+Each producer de-dups internally, so the same thing is never posted twice.
 """
 
 from __future__ import annotations
@@ -50,23 +53,26 @@ def run(
     if remaining <= 0:
         return created
 
-    # 1) targeted commit slot(s)
+    # 1) GUARANTEED pure AI-news post — exactly one per day, always 'opinion' (never a
+    #    tie-in), independent of what fills the other slot. force_style pins it.
+    news_have = counts.get("opinion", 0) + counts.get("tie_in", 0)
+    if news_have == 0 and config.ai_news_max_per_day > 0:
+        ids = news_content_gen.generate_news_drafts(
+            conn, config, llm, now=now, hints=news_hints, voice=voice,
+            limit=1, force_style="opinion",
+        )
+        created["news"] += ids
+        remaining -= len(ids)
+
+    # 2) BEST-AVAILABLE slot(s) — prefer a commit post (the windowed best-pick of your
+    #    recent work); if there's no commit material it falls through to another AI-news
+    #    post (opinion/tie_in per ai_news_style) below.
     commit_need = min(max(0, config.commit_posts_per_day - counts.get("commit", 0)), remaining)
     if commit_need > 0:
         ids = content_gen.select_and_draft(
             conn, config, llm, now=now, max_posts=commit_need, hints=commit_hints, voice=voice
         )
         created["commit"] += ids
-        remaining -= len(ids)
-
-    # 2) targeted outside-world slot(s) (opinion / tie_in)
-    news_have = counts.get("opinion", 0) + counts.get("tie_in", 0)
-    news_need = min(max(0, config.ai_news_max_per_day - news_have), remaining)
-    if news_need > 0:
-        ids = news_content_gen.generate_news_drafts(
-            conn, config, llm, now=now, hints=news_hints, voice=voice, limit=news_need
-        )
-        created["news"] += ids
         remaining -= len(ids)
 
     # 3) fallback — fill leftover slots from whichever side still has material, so the
