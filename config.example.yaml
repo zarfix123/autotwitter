@@ -43,6 +43,11 @@ posts_per_day: 2          # default 2; research-backed sweet spot is 2-4. Hard c
 min_post_spacing_minutes: 180   # >= 3h between posts
 post_jitter_minutes: 25         # randomize exact send time +/- this many minutes
 
+# Reply/follow engine master switch. Set false to run posting-only (no reading
+# others, no reply/follow drafts, no X read spend) — useful when a new/unverified
+# X account has its replies blocked by anti-spam. Default true.
+engagement_enabled: true
+
 # Reply queue (Phase 2)
 daily_reply_queue_size: 5  # default 5, adjustable up to ~15
 

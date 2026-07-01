@@ -49,6 +49,10 @@ class Config:
     max_follows_per_day: int = 2
     x_premium: bool = False
     weekly_cost_cap_usd: float = 15.0
+    # Master switch for the reply/follow engine (reading others + engaging). Turn
+    # off to run posting-only — e.g. while X blocks a new/unverified account's
+    # replies — which also stops all X read spend from the monitor/live-reply jobs.
+    engagement_enabled: bool = True
     # Phase 2 (growth engine) tunables.
     reply_reminder_window: str = "12:00-13:00"
     monitor_scan_interval_minutes: int = 30
@@ -155,6 +159,7 @@ def config_from_dict(raw: dict) -> Config:
         max_follows_per_day=int(raw.get("max_follows_per_day", 2)),
         x_premium=bool(raw.get("x_premium", False)),
         weekly_cost_cap_usd=float(raw.get("weekly_cost_cap_usd", 15.0)),
+        engagement_enabled=bool(raw.get("engagement_enabled", True)),
         reply_reminder_window=str(raw.get("reply_reminder_window", "12:00-13:00")),
         monitor_scan_interval_minutes=int(raw.get("monitor_scan_interval_minutes", 30)),
         opportunity_max_age_minutes=int(raw.get("opportunity_max_age_minutes", 120)),

@@ -300,30 +300,37 @@ async def main_async() -> None:
     sched.add_job(watch_cycle, "interval", minutes=30, id="watch_cycle")
     sched.add_job(post_tick, "interval", minutes=1, id="post_tick")
     sched.add_job(
-        monitor_scan, "interval", minutes=config.monitor_scan_interval_minutes, id="monitor_scan"
-    )
-    sched.add_job(
         analytics_pull, "interval", hours=config.analytics_pull_interval_hours, id="analytics_pull"
     )
     if config.ai_news_enabled:
         sched.add_job(
             ai_news_tick, "interval", hours=config.ai_news_interval_hours, id="ai_news_tick"
         )
-    if reply_reminder is not None:
-        windows = parse_windows([config.reply_reminder_window])
-        start = windows[0].start if windows else datetime.now().time().replace(hour=12, minute=0)
+    # Reply/follow engine (reads others + drafts replies). Gate it off entirely when
+    # disabled — e.g. while X blocks a new/unverified account's replies — so it stops
+    # spending X read credits scanning + drafting engagements that can't be sent.
+    if config.engagement_enabled:
         sched.add_job(
-            reply_reminder,
-            CronTrigger(hour=start.hour, minute=start.minute),
-            id="reply_reminder",
+            monitor_scan, "interval",
+            minutes=config.monitor_scan_interval_minutes, id="monitor_scan",
         )
-    if live_reply_tick is not None:
-        sched.add_job(
-            live_reply_tick,
-            "interval",
-            minutes=config.live_reply_interval_minutes,
-            id="live_reply_tick",
-        )
+        if reply_reminder is not None:
+            windows = parse_windows([config.reply_reminder_window])
+            start = windows[0].start if windows else datetime.now().time().replace(hour=12, minute=0)
+            sched.add_job(
+                reply_reminder,
+                CronTrigger(hour=start.hour, minute=start.minute),
+                id="reply_reminder",
+            )
+        if live_reply_tick is not None:
+            sched.add_job(
+                live_reply_tick,
+                "interval",
+                minutes=config.live_reply_interval_minutes,
+                id="live_reply_tick",
+            )
+    else:
+        logger.info("Engagement engine DISABLED (engagement_enabled: false) — posting only.")
 
     _start_admin_thread(secrets)
     sched.start()
